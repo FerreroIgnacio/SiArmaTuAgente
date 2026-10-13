@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agentes · Si</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%23d95f02'/%3E%3Ccircle cx='50' cy='50' r='38' stroke='white' stroke-width='5' fill='none'/%3E%3Ctext x='50' y='66' text-anchor='middle' font-family='Arial' font-weight='800' font-size='42' fill='white'%3ESi%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="app">
+
+  <!-- Barra superior -->
+  <header class="topbar">
+    <a href="/" class="brand" aria-label="Si">
+      <svg class="mark" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="50" cy="50" r="46" stroke="currentColor" stroke-width="5"/>
+        <text x="50" y="66" text-anchor="middle" font-family="Arial, sans-serif" font-weight="800" font-size="48" fill="currentColor">Si</text>
+      </svg>
+      <span>Agentes</span>
+    </a>
+    <span class="crumb-sep">/</span>
+    <span class="crumb" id="crumb">Nuevo agente</span>
+    <span class="saved" id="saved"></span>
+    <div class="top-right">
+      <span class="pill" id="pill" data-estado="desconectado">Desconectado</span>
+      <button type="button" class="btn btn-primary" id="btnConectar">Conectar</button>
+      <button type="button" class="btn btn-outline" id="btnDesconectar" hidden>Pausar</button>
+      <span class="usuario" id="usuario">
+        <img id="usuarioFoto" alt="" referrerpolicy="no-referrer">
+        <span id="usuarioNombre"></span>
+        <button type="button" class="btn btn-ghost btn-sm" id="salir">Salir</button>
+      </span>
+    </div>
+  </header>
+
+  <!-- Barra lateral -->
+  <aside class="sidebar">
+    <div class="side-block">
+      <div class="side-title">
+        <span>Mis agentes</span>
+        <button type="button" class="icon-btn" id="nuevoBot" title="Nuevo agente" aria-label="Nuevo agente">+</button>
+      </div>
+      <ul class="bot-list" id="botList"></ul>
+    </div>
+    <nav class="side-block" aria-label="Secciones">
+      <div class="side-title"><span>Configuración</span></div>
+      <ul class="sections">
+        <li><button type="button" data-sec="negocio" disabled>Negocio <em class="tag">Pronto</em></button></li>
+        <li><button type="button" data-sec="comportamiento">General</button></li>
+        <li><button type="button" data-sec="respuestas">Respuestas <span class="count" id="respCount"></span></button></li>
+        <li><button type="button" data-sec="conversaciones">Conversaciones <span class="count" id="logCount"></span></button></li>
+        <li><button type="button" data-sec="planillas">Planillas</button></li>
+        <li><button type="button" data-sec="metricas">Métricas</button></li>
+      </ul>
+    </nav>
+  </aside>
+
+  <!-- Editor -->
+  <main class="editor">
+    <div class="sin-agentes-aviso" id="sinAgentes">
+      <h2>No tenés ningún agente</h2>
+      <p>Creá uno para empezar a armar sus respuestas y conectarlo a WhatsApp.</p>
+      <button type="button" class="btn btn-primary" id="crearPrimerAgente">Crear agente</button>
+    </div>
+    <form id="form" novalidate autocomplete="off">
+
+      <section class="sec" data-sec="negocio" hidden>
+        <div class="sec-head">
+          <h2>Negocio</h2>
+          <p>Lo que el agente sabe de tu negocio. Solo responde con esto.</p>
+        </div>
+        <fieldset class="card" disabled>
+          <div class="row2">
+            <label>Nombre<input name="negocio.nombre" placeholder="Panadería La Espiga"></label>
+            <label>Rubro<input name="negocio.rubro" placeholder="Panadería y confitería"></label>
+          </div>
+          <label>Descripción<textarea name="negocio.descripcion" rows="6" placeholder="Qué venden, cómo trabajan, envíos, formas de pago…"></textarea></label>
+          <div class="row2">
+            <label>Horarios<input name="negocio.horarios" placeholder="Lun a sáb 7 a 20 hs"></label>
+            <label>Ubicación<input name="negocio.ubicacion" placeholder="Av. Siempre Viva 742, Lanús"></label>
+          </div>
+          <label>Derivar a una persona<input name="negocio.contactoHumano" placeholder="Llamá al 11 2345-6789"><small>Se ofrece cuando el agente no tiene la respuesta.</small></label>
+        </fieldset>
+      </section>
+
+      <section class="sec" data-sec="comportamiento" hidden>
+        <div class="sec-head">
+          <h2>General</h2>
+          <p>Cómo se llama, por dónde recibe los mensajes y qué hace cuando no encuentra una respuesta.</p>
+        </div>
+        <div class="card">
+          <label>Nombre del agente<input name="agente.nombre" placeholder="Asistente"></label>
+          <label>Si no entiende el mensaje<textarea name="agente.fallback" rows="2" placeholder="Perdón, no te entendí. Escribí *menú* para ver las opciones."></textarea></label>
+        </div>
+        <div class="card">
+          <h3>Configuración</h3>
+          <label class="switch"><input type="checkbox" name="reglas.ignorarGrupos"><span>No responder en grupos</span></label>
+          <div>
+            <label class="switch is-disabled"><input type="checkbox" name="agente.usarLLM" disabled><span>Utilizar LLM <em class="tag">Pronto</em></span></label>
+            <p class="help indent">Cuando ninguna respuesta coincide, genera una con el modelo local de la empresa en lugar del mensaje de "no entendí".</p>
+            <p class="help indent llm-estado" id="llmEstado" hidden></p>
+          </div>
+        </div>
+        <div class="card">
+          <h3>Integraciones</h3>
+          <div class="integracion">
+            <svg viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
+            <div>
+              <b>Google Sheets</b>
+              <p class="help" id="googleEstado">Revisando…</p>
+            </div>
+            <button type="button" class="btn btn-outline btn-sm" id="googleConectar">Conectar Google</button>
+            <button type="button" class="btn btn-ghost btn-sm" id="googleDesconectar" hidden>Desconectar</button>
+          </div>
+        </div>
+        <div class="card">
+          <h3>Conexión</h3>
+          <div class="seg" role="radiogroup">
+            <label><input type="radio" name="conexion.proveedor" value="baileys"><span>WhatsApp (QR)</span></label>
+            <label class="is-disabled"><input type="radio" name="conexion.proveedor" value="meta" disabled><span>API de Meta <em class="tag">Pronto</em></span></label>
+          </div>
+          <p class="help" id="provHelp"></p>
+          <div id="metaFields" class="meta-fields" hidden>
+            <div class="row2">
+              <label>Phone number ID<input name="conexion.meta.phoneNumberId"></label>
+              <label>Verify token<input name="conexion.meta.verifyToken"></label>
+            </div>
+            <label>Access token<input name="conexion.meta.accessToken" type="password"></label>
+            <label>Webhook<input id="webhookUrl" readonly></label>
+          </div>
+        </div>
+        <div class="card">
+          <h3>Estado</h3>
+          <div class="status-line">
+            <span class="pill" id="pill2" data-estado="desconectado">Desconectado</span>
+            <span id="statusDetail" class="help"></span>
+          </div>
+          <div id="qrBox" class="qr-box" hidden>
+            <img id="qrImg" alt="Código QR para vincular WhatsApp">
+            <ol>
+              <li>Abrí WhatsApp en el celular del negocio.</li>
+              <li><b>Dispositivos vinculados</b> → <b>Vincular un dispositivo</b>.</li>
+              <li>Escaneá el código.</li>
+            </ol>
+          </div>
+          <div class="actions">
+            <button type="button" class="btn btn-ghost" id="btnLogout" hidden>Desvincular número</button>
+          </div>
+        </div>
+        <div class="card zona-peligro">
+          <h3>Borrar agente</h3>
+          <p class="help">Elimina el agente con sus respuestas, archivos y métricas, y lo desvincula de WhatsApp. No se puede deshacer.</p>
+          <div class="actions">
+            <button type="button" class="btn btn-sm btn-borrar" id="borrarAgente">Borrar agente</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="sec sec-flow" data-sec="respuestas" hidden>
+        <div class="sec-head">
+          <h2>Respuestas</h2>
+          <p>El recorrido de la conversación. Cada estado manda sus mensajes y escucha respuestas; cada respuesta lleva a otro estado.</p>
+        </div>
+        <div class="flow" id="flow" aria-label="Lienzo de respuestas">
+          <div class="flow-world" id="flowWorld">
+            <svg class="flow-edges" id="flowEdges" aria-hidden="true"></svg>
+            <div id="flowNodes"></div>
+          </div>
+          <div class="flow-tools">
+            <button type="button" class="icon-btn" id="zoomOut" aria-label="Alejar">−</button>
+            <span id="zoomPct">100%</span>
+            <button type="button" class="icon-btn" id="zoomIn" aria-label="Acercar">+</button>
+            <button type="button" class="btn btn-outline btn-sm" id="flowFit">Ajustar</button>
+            <button type="button" class="btn btn-outline btn-sm" id="flowOrdenar">Ordenar</button>
+            <button type="button" class="btn btn-primary btn-sm" id="flowNuevo">+ Estado</button>
+            <button type="button" class="btn btn-outline btn-sm" id="flowNuevaAccion">+ Acción</button>
+          </div>
+          <p class="flow-hint">Arrastrá para mover · Shift+clic para seleccionar varios · Clic en una línea para desconectar · Arrastrá los puntos para conectar</p>
+          <div class="card nodo-card" id="nodoEditor" hidden></div>
+        </div>
+      </section>
+
+      <section class="sec" data-sec="conversaciones" hidden>
+        <div class="sec-head">
+          <h2>Conversaciones</h2>
+          <p>Mensajes que entran y lo que responde el agente, en vivo.</p>
+        </div>
+        <div class="conv" id="conv" hidden>
+          <ul class="conv-lista" id="convLista"></ul>
+          <div class="conv-hilo">
+            <div class="conv-head" id="convHead"></div>
+            <div class="chat" id="convMsgs"></div>
+          </div>
+        </div>
+        <p class="empty" id="logEmpty">Todavía no hay mensajes. Conectá el agente y escribile al número.</p>
+      </section>
+
+      <section class="sec" data-sec="planillas" hidden>
+        <div class="sec-head">
+          <h2>Planillas</h2>
+          <p>Planillas de Google Sheets donde escriben las acciones de tus agentes. Están en el Drive de tu cuenta de Google conectada.</p>
+        </div>
+        <div class="card">
+          <div class="planilla-nueva">
+            <input id="planillaNombre" placeholder="Nombre de la planilla nueva" aria-label="Nombre de la planilla nueva">
+            <button type="button" class="btn btn-primary btn-sm" id="planillaCrear">Crear planilla</button>
+          </div>
+          <p class="help" id="planillasEstado"></p>
+          <ul class="planillas" id="planillasLista"></ul>
+        </div>
+      </section>
+
+      <section class="sec sec-wide" data-sec="metricas" hidden>
+        <div class="sec-head">
+          <h2>Métricas</h2>
+          <p>Mensajes reales de WhatsApp (la vista previa no cuenta).</p>
+          <button type="button" class="btn btn-outline btn-sm" id="refMetricas">Actualizar</button>
+        </div>
+        <div class="kpis">
+          <div class="kpi"><span>Mensajes recibidos</span><b id="kRecibidos">0</b></div>
+          <div class="kpi"><span>Conversaciones</span><b id="kChats">0</b></div>
+          <div class="kpi"><span>Respondidos automáticamente</span><b id="kResueltos">–</b><small id="kResueltosAbs"></small></div>
+          <div class="kpi"><span>Tiempo de respuesta</span><b id="kTiempo">–</b><small>promedio</small></div>
+        </div>
+        <div class="card">
+          <div class="chart-head">
+            <h3>Mensajes por día</h3>
+            <span class="help">Últimos 14 días</span>
+          </div>
+          <div class="bars" id="bars" role="img" aria-label="Mensajes recibidos por día"></div>
+          <div class="tip" id="tip" hidden></div>
+          <details class="tabla-dias">
+            <summary>Ver tabla</summary>
+            <table class="tbl"><thead><tr><th>Día</th><th>Mensajes</th><th>Conversaciones</th></tr></thead><tbody id="tDias"></tbody></table>
+          </details>
+        </div>
+        <div class="row2 align-start">
+          <div class="card">
+            <h3>Cómo se respondió</h3>
+            <table class="tbl"><tbody id="tFuentes"></tbody></table>
+          </div>
+          <div class="card">
+            <h3>Respuestas más usadas</h3>
+            <table class="tbl"><tbody id="tTop"></tbody></table>
+          </div>
+        </div>
+      </section>
+    </form>
+  </main>
+
+  <!-- Probador -->
+  <aside class="tester" aria-label="Probar agente">
+    <div class="tester-head">
+      <span class="avatar" id="tAvatar">A</span>
+      <div><b id="tName">Asistente</b><small>Vista previa</small></div>
+      <button type="button" class="icon-btn" id="tReset" title="Reiniciar conversación" aria-label="Reiniciar conversación">↺</button>
+    </div>
+    <div class="chat" id="chat"></div>
+    <form class="composer" id="composer">
+      <input id="tInput" placeholder="Escribí como un cliente…" autocomplete="off">
+      <button type="submit" aria-label="Enviar"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M2 21 23 12 2 3v7l15 2-15 2z"/></svg></button>
+    </form>
+  </aside>
+</div>
+
+<!-- Confirmación para borrar un agente -->
+<div class="modal" id="modalBorrar" hidden>
+  <div class="card modal-card" role="dialog" aria-modal="true" aria-labelledby="modalBorrarTitulo">
+    <h3 id="modalBorrarTitulo">¿Borrar este agente?</h3>
+    <p class="help">Se borran sus respuestas, archivos y métricas, y se desvincula de WhatsApp. No se puede deshacer.</p>
+    <label>Para confirmar, escribí el nombre del agente: <b id="modalBorrarNombre"></b>
+      <input id="modalBorrarInput" autocomplete="off">
+    </label>
+    <p class="help mal" id="modalBorrarError" hidden></p>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-outline btn-sm" id="modalBorrarCancelar">Cancelar</button>
+      <button type="button" class="btn btn-sm btn-borrar" id="modalBorrarConfirmar" disabled>Borrar agente</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js" type="module"></script>
+</body>
+</html>

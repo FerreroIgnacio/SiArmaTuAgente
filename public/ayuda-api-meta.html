@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>API de Meta · Si Arma Tu Agente</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%23d95f02'/%3E%3Ccircle cx='50' cy='50' r='38' stroke='white' stroke-width='5' fill='none'/%3E%3Ctext x='50' y='66' text-anchor='middle' font-family='Arial' font-weight='800' font-size='42' fill='white'%3ESi%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/styles.css">
+<style>
+  .legal{max-width:760px;margin:0 auto;padding:40px 16px 64px;line-height:1.6;}
+  .legal header{display:flex;align-items:center;gap:10px;margin-bottom:28px;}
+  .legal header .mark{width:32px;height:32px;color:var(--accent);}
+  .legal header a{display:flex;align-items:center;gap:10px;color:var(--ink);text-decoration:none;font:600 16px var(--font-head);}
+  .legal h1{font:600 28px/1.2 var(--font-head);margin-bottom:6px;}
+  .legal h2{font:600 18px var(--font-head);margin:28px 0 8px;}
+  .legal p,.legal li{color:#3d3631;}
+  .legal ul{padding-left:20px;display:grid;gap:4px;}
+  .legal .fecha{color:var(--muted);font-size:13px;}
+  .legal img{display:block;max-width:100%;border:1px solid #e6dfd8;border-radius:10px;margin:12px 0;}
+  .legal img.angosta{max-width:360px;}
+  .legal a{color:var(--accent-dark);}
+</style>
+</head>
+<body>
+<main class="legal">
+  <header>
+    <a href="/">
+      <svg class="mark" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <circle cx="50" cy="50" r="46" stroke="currentColor" stroke-width="5"/>
+        <text x="50" y="66" text-anchor="middle" font-family="Arial, sans-serif" font-weight="800" font-size="48" fill="currentColor">Si</text>
+      </svg>
+      Si Arma Tu Agente
+    </a>
+  </header>
+
+  <h1>Cómo conseguir tu API de Meta (WhatsApp Business)</h1>
+  <p class="fecha">Para atender clientes reales con tu agente, sin vincular un número por QR.</p>
+
+  <h2>Antes de empezar</h2>
+  <ul>
+    <li>Una cuenta personal de Facebook.</li>
+    <li>Un número de teléfono que <b>no esté registrado en WhatsApp ni en WhatsApp Business</b> (o que puedas desvincular). Tiene que poder recibir un SMS o llamada para verificarlo.</li>
+    <li>Idealmente, los datos de tu negocio (nombre legal, sitio web) para verificarlo con Meta.</li>
+  </ul>
+
+  <h2>1. Crear la app</h2>
+  <ul>
+    <li>Entrá a <a href="https://developers.facebook.com/apps" target="_blank" rel="noopener">developers.facebook.com/apps</a> e iniciá sesión.</li>
+    <li>Tocá <b>Crear app</b> y elegí el caso de uso <b>Conectarte con clientes en WhatsApp</b> (tipo de app <b>Business</b>).</li>
+    <li>Asociala a un <b>portfolio comercial</b> (Meta Business). Si no tenés, te deja crear uno en el momento.</li>
+  </ul>
+
+  <h2>2. Agregar WhatsApp y encontrar el Phone number ID</h2>
+  <ul>
+    <li>Dentro de la app, abrí <b>WhatsApp</b> → <b>Configuración de la API</b>.</li>
+    <li>Meta te da un número de prueba gratuito. Ahí vas a ver el <b>Phone number ID</b> y el <b>WhatsApp Business Account ID</b>.</li>
+    <li>Copiá el <b>Phone number ID</b> y pegalo en el campo del mismo nombre en la pestaña de conexión de Si Arma Tu Agente.</li>
+  </ul>
+
+  <h2>3. Conseguir un token que no venza</h2>
+  <p>El token que aparece en esa pantalla dura solo 24 horas. Para uno permanente:</p>
+  <ul>
+    <li>Entrá a <a href="https://business.facebook.com/settings" target="_blank" rel="noopener">Configuración del negocio</a> → <b>Usuarios</b> → <b>Usuarios del sistema</b>.</li>
+    <li>Creá un usuario del sistema con rol <b>Administrador</b>.</li>
+    <li>Asignale tu app con control total, y tocá <b>Generar token</b>.</li>
+    <li>Marcá los permisos <code>whatsapp_business_messaging</code> y <code>whatsapp_business_management</code>, y elegí vencimiento <b>Nunca</b>.</li>
+    <li>Copiá el token y pegalo en <b>Access token</b>. Guardalo bien: Meta no lo vuelve a mostrar.</li>
+  </ul>
+
+  <h2>4. Conectar el webhook</h2>
+  <ul>
+    <li>En Si Arma Tu Agente, elegí el proveedor <b>Meta</b>. Inventá un <b>Verify token</b> (cualquier texto) y copiá la URL del campo <b>Webhook</b>.</li>
+    <li>En Meta: <b>WhatsApp</b> → <b>Configuración</b> → <b>Webhook</b> → <b>Editar</b>. Pegá la URL y el Verify token, y tocá <b>Verificar y guardar</b>.</li>
+    <li>Suscribite al campo <b>messages</b>.</li>
+    <li>La URL tiene que ser pública y con HTTPS. Si estás en tu compu, usá un túnel como ngrok o Cloudflare Tunnel.</li>
+  </ul>
+
+  <h2>5. Pasar a tu número real</h2>
+  <ul>
+    <li>En <b>Configuración de la API</b> → <b>Agregar número de teléfono</b>, cargá el de tu negocio y verificalo con el código que te llega.</li>
+    <li>Cambiá el Phone number ID en Si Arma Tu Agente por el del número nuevo.</li>
+    <li>Para escribirle a cualquier persona (no solo a números de prueba) y subir el límite de mensajes, completá la <b>verificación del negocio</b> en Configuración del negocio → Centro de seguridad.</li>
+    <li>Pasá la app a modo <b>Activo</b> (Live) desde el panel de la app.</li>
+  </ul>
+
+  <h2>Cosas que conviene saber</h2>
+  <ul>
+    <li>Podés responderle gratis a un cliente durante las 24 horas posteriores a su último mensaje. Para escribirle primero o pasado ese plazo, Meta exige plantillas aprobadas y las cobra.</li>
+    <li>Con la API, ese número deja de funcionar en la app de WhatsApp del celular.</li>
+    <li>Los pasos y nombres de menús de Meta cambian seguido. Si algo no coincide, buscá el equivalente en la <a href="https://developers.facebook.com/docs/whatsapp/cloud-api/get-started" target="_blank" rel="noopener">documentación oficial</a>.</li>
+  </ul>
+</main>
+</body>
+</html>
