@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tu agente · Si</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%23d95f02'/%3E%3Ccircle cx='50' cy='50' r='38' stroke='white' stroke-width='5' fill='none'/%3E%3Ctext x='50' y='66' text-anchor='middle' font-family='Arial' font-weight='800' font-size='42' fill='white'%3ESi%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<style>
+  .local{min-height:100vh;display:grid;grid-template-rows:56px auto minmax(0,1fr) auto;}
+  .local > *{grid-area:auto;}
+  .local .topbar{position:sticky;top:0;z-index:5;}
+  .tabs{display:flex;gap:4px;padding:10px 32px 0;background:var(--panel);border-bottom:1px solid var(--line);overflow-x:auto;}
+  .tabs button{border:0;background:none;padding:8px 12px 10px;font-weight:600;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap;}
+  .tabs button[aria-current="true"]{color:var(--accent-dark);border-bottom-color:var(--accent);}
+  .local .editor{padding:28px 32px 32px;}
+  .local .sec{margin:0 auto;}
+  .encendido{display:flex;align-items:center;gap:16px;flex-wrap:wrap;}
+  .encendido p{flex:1;min-width:200px;}
+  .btn-lg{padding:10px 20px;font-size:14px;}
+  .btn-apagar{background:var(--ink);color:#fff;}
+  .gracias{position:sticky;bottom:0;z-index:5;display:flex;justify-content:center;align-items:center;gap:6px;flex-wrap:wrap;text-align:center;padding:12px 16px;background:var(--panel);border-top:1px solid var(--line);font-size:13px;color:var(--muted);}
+  .gracias b{color:var(--ink);font-weight:600;}
+  .gracias a{color:var(--accent-dark);font-weight:600;}
+  @media (max-width:720px){
+    .tabs{padding:8px 16px 0;}
+    .local .editor{padding:20px 16px 28px;}
+    .local .topbar .crumb{display:inline;max-width:40vw;}
+  }
+</style>
+</head>
+<body>
+<div class="local">
+  <header class="topbar">
+    <span class="brand" aria-label="Si">
+      <svg class="mark" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="50" cy="50" r="46" stroke="currentColor" stroke-width="5"/>
+        <text x="50" y="66" text-anchor="middle" font-family="Arial, sans-serif" font-weight="800" font-size="48" fill="currentColor">Si</text>
+      </svg>
+    </span>
+    <span class="crumb" id="crumb">Tu agente</span>
+    <div class="top-right">
+      <span class="pill" id="pill" data-estado="desconectado">Apagado</span>
+      <button type="button" class="btn btn-primary" id="btnPrender">Prender</button>
+      <button type="button" class="btn btn-apagar" id="btnApagar" hidden>Apagar</button>
+    </div>
+  </header>
+
+  <nav class="tabs" aria-label="Secciones">
+    <button type="button" data-sec="general" aria-current="true">General</button>
+    <button type="button" data-sec="conversaciones">Conversaciones <span class="count" id="logCount"></span></button>
+    <button type="button" data-sec="planillas">Planillas</button>
+    <button type="button" data-sec="metricas">Métricas</button>
+  </nav>
+
+  <main class="editor">
+    <section class="sec" data-sec="general">
+      <div class="sec-head">
+        <h2>General</h2>
+        <p>Tu agente corre en esta compu. Mientras esté prendido y la app abierta, responde por WhatsApp.</p>
+      </div>
+      <div class="card">
+        <h3>Estado</h3>
+        <div class="encendido">
+          <span class="pill" id="pill2" data-estado="desconectado">Apagado</span>
+          <p class="help" id="statusDetail">Prendelo para que empiece a responder.</p>
+        </div>
+        <div id="qrBox" class="qr-box" hidden>
+          <img id="qrImg" alt="Código QR para vincular WhatsApp">
+          <ol>
+            <li>Abrí WhatsApp en el celular del negocio.</li>
+            <li><b>Dispositivos vinculados</b> → <b>Vincular un dispositivo</b>.</li>
+            <li>Escaneá el código.</li>
+          </ol>
+        </div>
+        <div class="actions">
+          <button type="button" class="btn btn-ghost" id="btnDesvincular" hidden>Desvincular número</button>
+        </div>
+      </div>
+      <form class="card" id="form" autocomplete="off">
+        <h3>Agente</h3>
+        <label>Nombre del agente<input name="nombre" maxlength="80"></label>
+        <label>Si no entiende el mensaje<textarea name="fallback" rows="2"></textarea></label>
+        <label class="switch"><input type="checkbox" name="ignorarGrupos"><span>No responder en grupos</span></label>
+        <p class="help" id="guardado"></p>
+      </form>
+    </section>
+
+    <section class="sec" data-sec="conversaciones" hidden>
+      <div class="sec-head">
+        <h2>Conversaciones</h2>
+        <p>Mensajes que entran y lo que responde el agente, en vivo.</p>
+      </div>
+      <div class="conv" id="conv" hidden>
+        <ul class="conv-lista" id="convLista"></ul>
+        <div class="conv-hilo">
+          <div class="conv-head" id="convHead"></div>
+          <div class="chat" id="convMsgs"></div>
+        </div>
+      </div>
+      <p class="empty" id="logEmpty">Todavía no hay mensajes. Prendé el agente y escribile al número.</p>
+    </section>
+
+    <section class="sec" data-sec="planillas" hidden>
+      <div class="sec-head">
+        <h2>Planillas</h2>
+        <p>Planillas de Google Sheets de tu cuenta y cuáles usan las acciones de este agente.</p>
+      </div>
+      <div class="card">
+        <p class="help" id="planillasEstado">Cargando…</p>
+        <ul class="planillas" id="planillasLista"></ul>
+      </div>
+    </section>
+
+    <section class="sec sec-wide" data-sec="metricas" hidden>
+      <div class="sec-head">
+        <h2>Métricas</h2>
+        <p>Mensajes reales de WhatsApp que respondió tu agente.</p>
+        <button type="button" class="btn btn-outline btn-sm" id="refMetricas">Actualizar</button>
+      </div>
+      <div class="kpis">
+        <div class="kpi"><span>Mensajes recibidos</span><b id="kRecibidos">0</b></div>
+        <div class="kpi"><span>Conversaciones</span><b id="kChats">0</b></div>
+        <div class="kpi"><span>Respondidos automáticamente</span><b id="kResueltos">–</b><small id="kResueltosAbs"></small></div>
+        <div class="kpi"><span>Tiempo de respuesta</span><b id="kTiempo">–</b><small>promedio</small></div>
+      </div>
+      <div class="card">
+        <div class="chart-head">
+          <h3>Mensajes por día</h3>
+          <span class="help">Últimos 14 días</span>
+        </div>
+        <div class="bars" id="bars" role="img" aria-label="Mensajes recibidos por día"></div>
+        <div class="bar-labels" id="barLabels" aria-hidden="true"></div>
+        <div class="tip" id="tip" hidden></div>
+      </div>
+      <div class="row2 align-start">
+        <div class="card">
+          <h3>Cómo se respondió</h3>
+          <table class="tbl"><tbody id="tFuentes"></tbody></table>
+        </div>
+        <div class="card">
+          <h3>Respuestas más usadas</h3>
+          <table class="tbl"><tbody id="tTop"></tbody></table>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="gracias">
+    <b>¡Esperamos que disfrutes de tu agente!</b>
+    <span>Cualquier duda siempre podés encontrarnos en <a href="https://sisoftwaresolutions.com" target="_blank" rel="noopener">SiSoftwareSolutions.com</a></span>
+  </footer>
+</div>
+
+<script type="module">
+const $ = s => document.querySelector(s);
+const $$ = s => [...document.querySelectorAll(s)];
+
+async function api(metodo, url, body) {
+  const res = await fetch(url, {
+    method: metodo,
+    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `Error ${res.status}`);
+  return data;
+}
+
+function el(tag, props = {}, ...hijos) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (k === 'class') e.className = v;
+    else if (k.startsWith('on')) e.addEventListener(k.slice(2), v);
+    else if (k in e) e[k] = v;
+    else e.setAttribute(k, v);
+  }
+  e.append(...hijos.filter(h => h != null));
+  return e;
+}
+
+/* ---------- Secciones ---------- */
+function mostrar(sec) {
+  $$('.tabs button').forEach(b => b.setAttribute('aria-current', String(b.dataset.sec === sec)));
+  $$('.sec').forEach(s => (s.hidden = s.dataset.sec !== sec));
+  if (sec === 'metricas') cargarMetricas();
+  if (sec === 'conversaciones') pintarConvs();
+  if (sec === 'planillas') cargarPlanillas();
+}
+$$('.tabs button').forEach(b => (b.onclick = () => mostrar(b.dataset.sec)));
+
+/* ---------- Estado y prender/apagar ---------- */
+const ETIQUETAS = { desconectado: 'Apagado', conectando: 'Prendiendo…', esperando_qr: 'Esperando QR', conectado: 'Prendido', error: 'Error' };
+
+function pintarEstado(s) {
+  for (const pill of [$('#pill'), $('#pill2')]) {
+    pill.dataset.estado = s.estado;
+    pill.textContent = ETIQUETAS[s.estado] || s.estado;
+  }
+  $('#statusDetail').textContent = s.estado === 'conectado' && s.numero ? `Respondiendo en +${s.numero}`
+    : s.estado === 'esperando_qr' ? 'Vinculá el número del negocio escaneando el código.'
+    : s.detalle || (s.estado === 'desconectado' ? 'Prendelo para que empiece a responder.' : '');
+  $('#qrBox').hidden = !(s.estado === 'esperando_qr' && s.qr);
+  if (s.qr) $('#qrImg').src = s.qr;
+  const activo = s.estado !== 'desconectado' && s.estado !== 'error';
+  $('#btnPrender').hidden = activo;
+  $('#btnApagar').hidden = !activo;
+  $('#btnDesvincular').hidden = s.estado !== 'conectado';
+}
+
+async function accion(boton, fn) {
+  boton.disabled = true;
+  try { await fn(); }
+  catch (err) { $('#statusDetail').textContent = err.message; mostrar('general'); }
+  finally { boton.disabled = false; }
+}
+$('#btnPrender').onclick = e => accion(e.currentTarget, async () => { mostrar('general'); pintarEstado(await api('POST', '/api/prender')); });
+$('#btnApagar').onclick = e => accion(e.currentTarget, () => api('POST', '/api/apagar'));
+$('#btnDesvincular').onclick = e => accion(e.currentTarget, async () => {
+  if (!confirm('¿Desvincular este número? Para volver a prenderlo hay que escanear el QR de nuevo.')) return;
+  await api('POST', '/api/desvincular');
+});
+
+/* ---------- General ---------- */
+const form = $('#form');
+let timer = null;
+function guardar() {
+  clearTimeout(timer);
+  timer = setTimeout(async () => {
+    const datos = { nombre: form.nombre.value, fallback: form.fallback.value, ignorarGrupos: form.ignorarGrupos.checked };
+    try {
+      await api('PUT', '/api/agente', datos);
+      $('#guardado').textContent = 'Guardado';
+      $('#crumb').textContent = datos.nombre || 'Tu agente';
+    } catch (err) { $('#guardado').textContent = err.message; }
+  }, 500);
+}
+form.addEventListener('input', guardar);
+form.addEventListener('submit', e => e.preventDefault());
+
+/* ---------- Conversaciones ---------- */
+const convs = new Map(); // chatId -> { nombre, msgs, leido }
+let convSel = null;
+const horaLog = ts => new Date(ts).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+
+function pintarConvs() {
+  $('#logCount').textContent = convs.size || '';
+  $('#logEmpty').hidden = convs.size > 0;
+  $('#conv').hidden = convs.size === 0;
+  if (!convs.size) return;
+  if (!convs.has(convSel)) convSel = [...convs.keys()][0];
+  const orden = [...convs].sort((a, b) => b[1].msgs.at(-1).ts - a[1].msgs.at(-1).ts);
+  $('#convLista').replaceChildren(...orden.map(([id, c]) => {
+    const ult = c.msgs.at(-1);
+    const sinLeer = c.msgs.length - c.leido;
+    return el('li', { class: id === convSel ? 'sel' : '' },
+      el('button', { type: 'button', onclick: () => { convSel = id; pintarConvs(); } },
+        el('span', { class: 'conv-top' }, el('b', {}, c.nombre), el('time', {}, horaLog(ult.ts))),
+        el('span', { class: 'conv-bot' },
+          el('span', { class: 'conv-prev' }, `${ult.de === 'bot' ? 'Agente: ' : ''}${ult.texto}`),
+          sinLeer > 0 && id !== convSel ? el('span', { class: 'count' }, sinLeer) : null)));
+  }));
+  const c = convs.get(convSel);
+  if (!$('.sec[data-sec="conversaciones"]').hidden) c.leido = c.msgs.length;
+  $('#convHead').textContent = `${c.nombre} · ${c.msgs.length} mensajes`;
+  const msgs = $('#convMsgs');
+  const abajo = msgs.scrollHeight - msgs.scrollTop - msgs.clientHeight < 40;
+  msgs.replaceChildren(...c.msgs.map(m => el('div', { class: `msg ${m.de === 'bot' ? 'bot' : 'yo'}`, title: horaLog(m.ts) },
+    m.texto, el('small', { class: 'msg-hora' }, horaLog(m.ts)))));
+  if (abajo || c.msgs.length === 1) msgs.scrollTop = msgs.scrollHeight;
+}
+
+function agregarLog(m) {
+  let c = convs.get(m.chatId);
+  if (!c) convs.set(m.chatId, c = { nombre: m.chatId.split('@')[0], msgs: [], leido: 0 });
+  if (m.de !== 'bot' && m.nombre) c.nombre = m.nombre;
+  c.msgs.push(m);
+}
+
+/* ---------- Planillas ---------- */
+async function cargarPlanillas() {
+  const estado = $('#planillasEstado');
+  try {
+    const ps = await api('GET', '/api/planillas');
+    estado.textContent = ps.length ? '' : 'No hay planillas. Se crean desde el creador de agentes, en Planillas o en una acción de Sheets.';
+    $('#planillasLista').replaceChildren(...ps.map(p => el('li', {},
+      el('div', {}, el('b', {}, p.nombre),
+        el('small', {}, el('span', { class: p.acciones.length ? 'uso' : 'sin-uso' }, p.acciones.length
+          ? `Usada por ${p.acciones.length} ${p.acciones.length === 1 ? 'acción' : 'acciones'}: ${p.acciones.join(', ')}`
+          : 'Sin acciones de este agente que la usen'))),
+      el('a', { href: p.url, target: '_blank', rel: 'noopener', class: 'btn btn-outline btn-sm' }, 'Abrir ↗'))));
+  } catch (err) {
+    estado.textContent = err.message;
+  }
+}
+
+/* ---------- Métricas ---------- */
+const FUENTES = { inicio: 'Inicio', opcion: 'Opción elegida', llm: 'LLM', sin_coincidencia: 'No entendió' };
+const fmt = n => n.toLocaleString('es-AR');
+const fechaCorta = f => { const [, m, d] = f.split('-'); return `${Number(d)}/${Number(m)}`; };
+
+async function cargarMetricas() {
+  const m = await api('GET', '/api/metricas').catch(() => null);
+  if (!m) return;
+  $('#kRecibidos').textContent = fmt(m.recibidos);
+  $('#kChats').textContent = fmt(m.conversaciones);
+  $('#kResueltos').textContent = m.recibidos ? `${Math.round((m.resueltos / m.recibidos) * 100)}%` : '–';
+  $('#kResueltosAbs').textContent = m.recibidos ? `${fmt(m.resueltos)} de ${fmt(m.recibidos)}` : '';
+  $('#kTiempo').textContent = m.recibidos ? (m.msPromedio < 1000 ? `${m.msPromedio} ms` : `${(m.msPromedio / 1000).toFixed(1)} s`) : '–';
+
+  const max = Math.max(1, ...m.serie.map(d => d.recibidos));
+  const iMax = m.serie.findIndex(d => d.recibidos === max && max > 0);
+  const tip = $('#tip');
+  $('#bars').replaceChildren(...m.serie.map((d, i) => {
+    const alto = (d.recibidos / max) * 100;
+    const barra = el('div', { class: 'bar' }, el('i'));
+    barra.firstChild.style.height = `${alto}%`;
+    if (d.recibidos && (i === iMax || i === m.serie.length - 1)) {
+      const lbl = el('em', {}, fmt(d.recibidos));
+      lbl.style.bottom = `calc(${alto}% + 2px)`;
+      barra.append(lbl);
+    }
+    barra.addEventListener('mousemove', e => {
+      tip.hidden = false;
+      tip.textContent = `${fechaCorta(d.fecha)} · ${fmt(d.recibidos)} mensajes · ${fmt(d.conversaciones)} conversaciones`;
+      tip.style.left = `${e.clientX + 12}px`;
+      tip.style.top = `${e.clientY - 34}px`;
+    });
+    barra.addEventListener('mouseleave', () => (tip.hidden = true));
+    return barra;
+  }));
+  $('#barLabels').replaceChildren(...m.serie.map((d, i) => el('span', {}, i % 2 === m.serie.length % 2 ? '' : fechaCorta(d.fecha))));
+  $('#tFuentes').replaceChildren(...Object.entries(FUENTES).map(([k, t]) => {
+    const n = m.porFuente[k] || 0;
+    const pct = m.recibidos ? ` ${Math.round((n / m.recibidos) * 100)}%` : '';
+    return el('tr', {}, el('td', {}, t), el('td', {}, fmt(n), el('span', { class: 'sub' }, pct)));
+  }));
+  $('#tTop').replaceChildren(...(m.top.length
+    ? m.top.map(t => el('tr', {}, el('td', {}, t.titulo), el('td', {}, fmt(t.usos))))
+    : [el('tr', {}, el('td', { class: 'help' }, 'Sin datos todavía'), el('td'))]));
+}
+$('#refMetricas').onclick = cargarMetricas;
+
+/* ---------- Inicio ---------- */
+async function iniciar() {
+  const a = await api('GET', '/api/agente');
+  form.nombre.value = a.nombre || '';
+  form.fallback.value = a.fallback || '';
+  form.ignorarGrupos.checked = a.ignorarGrupos;
+  $('#crumb').textContent = a.nombre || 'Tu agente';
+  document.title = `${a.nombre || 'Tu agente'} · Si`;
+  pintarEstado(a.estado);
+  for (const msgs of Object.values(await api('GET', '/api/conversaciones'))) msgs.forEach(agregarLog);
+  pintarConvs();
+
+  const eventos = new EventSource('/api/eventos');
+  eventos.addEventListener('status', e => pintarEstado(JSON.parse(e.data)));
+  eventos.addEventListener('mensaje', e => { agregarLog(JSON.parse(e.data)); pintarConvs(); });
+  eventos.addEventListener('metricas', () => { if (!$('.sec[data-sec="metricas"]').hidden) cargarMetricas(); });
+  eventos.onerror = () => pintarEstado({ estado: 'error', detalle: 'Se cerró el programa del agente. Abrilo de nuevo para seguir.' });
+}
+iniciar().catch(err => ($('#statusDetail').textContent = err.message));
+</script>
+</body>
+</html>

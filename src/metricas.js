@@ -40,6 +40,8 @@ export async function registrar(botId, { chatId, fuente, respuestaId, enviados, 
   persistir(botId);
 }
 
+export const charlasHoy = async botId => (await cargar(botId)).porDia[dia()]?.chats.length || 0;
+
 export async function resumen(bot, dias = 14) {
   const m = await cargar(bot.id);
   const serie = [];

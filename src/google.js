@@ -1,4 +1,5 @@
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdirSync } from 'node:fs';
+import { readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { DATA_DIR } from './store.js';
 
@@ -6,7 +7,7 @@ import { DATA_DIR } from './store.js';
 // Se pide drive.file (no sensible, sin la advertencia de app no verificada): solo da acceso a las planillas
 // que crea la app, por eso las planillas se crean desde acá.
 const DIR = path.join(DATA_DIR, 'google');
-await mkdir(DIR, { recursive: true });
+mkdirSync(DIR, { recursive: true });
 
 const DRIVE_FILE = 'https://www.googleapis.com/auth/drive.file';
 export const SCOPES_INTEGRACION = ['openid', 'email', DRIVE_FILE];
@@ -116,6 +117,21 @@ export async function listarPlanillas(sub) {
 export async function hojasDe(sub, planilla) {
   const { sheets = [] } = await api(sub, 'GET', `${base(idPlanilla(planilla))}?fields=sheets.properties.title`);
   return sheets.map(s => s.properties.title);
+}
+
+// Primeras filas de una hoja (sin hoja: la primera) junto con la lista de hojas, para la vista previa.
+// Cache corto: la lista de planillas pide una vista previa por planilla.
+const previas = new Map();
+export async function vistaPrevia(sub, planilla, hoja, filas = 20) {
+  const id = idPlanilla(planilla), clave = `${sub}|${id}|${hoja || ''}`;
+  const c = previas.get(clave);
+  if (c && Date.now() - c.t < 15000) return c.d;
+  const hojas = await hojasDe(sub, id);
+  hoja = hojas.includes(hoja) ? hoja : hojas[0];
+  const { values = [] } = await api(sub, 'GET', `${base(id)}/values/${rango(hoja, `A1:Z${filas}`)}`);
+  const d = { hojas, hoja, filas: values };
+  previas.set(clave, { t: Date.now(), d });
+  return d;
 }
 
 // columnas: [{ columna: 'A', valor }]. Agrega una fila nueva con esos valores.

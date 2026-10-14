@@ -2,18 +2,21 @@ import express from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
+import { createReadStream } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { ARCHIVOS_DIR, borrarBot, botPublico, getBot, listBots, saveBot } from './store.js';
 import { botActualizado, conectar, desconectar, estado, providerDe, suscribir } from './runtime.js';
 import { responder, olvidarChat } from './engine.js';
 import { proveedoresDisponibles } from './providers/index.js';
-import { resumen as resumenMetricas } from './metricas.js';
+import { charlasHoy, resumen as resumenMetricas } from './metricas.js';
 import { estadoLLM } from './llm.js';
 import { requerirLogin, rutasAuth } from './auth.js';
 import { ejecutar, variables } from './acciones.js';
-import { crearPlanilla, desconectarGoogle, estadoGoogle, hojasDe, idPlanilla, listarPlanillas } from './google.js';
+import { ejecutableDelAgente, plataformasDisponibles } from './descarga.js';
+import { crearPlanilla, desconectarGoogle, estadoGoogle, hojasDe, idPlanilla, listarPlanillas, vistaPrevia } from './google.js';
 
 const app = express();
+app.set('trust proxy', true);
 app.use(express.json({ limit: '200kb' }));
 rutasAuth(app);
 app.get(['/', '/index.html'], requerirLogin);
@@ -45,11 +48,15 @@ app.get('/api/yo', (req, res) => res.json(req.usuario));
 
 app.get('/api/bots', async (req, res) => {
   const bots = (await listBots()).filter(b => b?.dueno === req.usuario.sub).sort((a, b) => a.creado.localeCompare(b.creado));
-  res.json(bots.map(b => ({ id: b.id, nombre: b.agente.nombre, estado: estado(b.id).estado })));
+  res.json(await Promise.all(bots.map(async b => ({
+    id: b.id, nombre: b.agente.nombre, estado: estado(b.id).estado,
+    estados: Math.max((b.flujo?.nodos?.length || 1) - 1, 0), charlasHoy: await charlasHoy(b.id),
+  }))));
 });
 
 app.post('/api/bots', async (req, res) => {
   try {
+    if ((await listBots()).some(b => b?.dueno === req.usuario.sub)) return res.status(409).json({ error: 'Cada cuenta tiene un solo agente' });
     // Nombre por defecto: "Agente de <nombre de la cuenta>"
     const nombre = `Agente de ${req.usuario.nombre || req.usuario.email.split('@')[0]}`;
     const datos = validar(req.body);
@@ -139,6 +146,8 @@ app.post('/api/planillas', conGoogle(async (req, res) => {
 }));
 app.get('/api/planillas/:id/hojas', conGoogle(async (req, res) => res.json(await hojasDe(req.usuario.sub, req.params.id))));
 
+app.get('/api/planillas/:id/preview', conGoogle(async (req, res) => res.json(await vistaPrevia(req.usuario.sub, req.params.id, req.query.hoja))));
+
 app.get('/api/google', async (req, res) => res.json(await estadoGoogle(req.usuario.sub)));
 app.post('/api/google/desconectar', async (req, res) => { await desconectarGoogle(req.usuario.sub); res.json({ ok: true }); });
 
@@ -152,6 +161,21 @@ app.post('/api/bots/:id/archivos', express.raw({ type: () => true, limit: '16mb'
   await mkdir(path.join(ARCHIVOS_DIR, bot.id), { recursive: true });
   await writeFile(path.join(ARCHIVOS_DIR, rel), req.body);
   res.status(201).json({ url: `/archivos/${rel.split('/').map(encodeURIComponent).join('/')}`, nombre });
+}));
+
+// Estado que muestra el panel. ESTADO_SERVIDOR=degradado|caido en .env para avisar demoras o mantenimiento
+app.get('/api/estado', (req, res) => res.json({ estado: ['degradado', 'caido'].includes(process.env.ESTADO_SERVIDOR) ? process.env.ESTADO_SERVIDOR : 'operativo' }));
+
+// Descargar el agente para correrlo localmente (ver src/local)
+app.get('/api/descargas', (req, res) => res.json(plataformasDisponibles()));
+app.get('/api/bots/:id/descargar', conBot(async (bot, req, res) => {
+  const { nombre, exe, tam, paquete } = await ejecutableDelAgente(bot, String(req.query.plataforma || ''));
+  res.attachment(nombre);
+  res.set({ 'Content-Type': 'application/octet-stream', 'Content-Length': String(tam) });
+  const lectura = createReadStream(exe);
+  lectura.on('error', () => res.destroy());
+  lectura.on('end', () => res.end(paquete));
+  lectura.pipe(res, { end: false });
 }));
 
 app.get('/api/llm', async (req, res) => res.json(await estadoLLM()));

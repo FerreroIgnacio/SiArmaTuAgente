@@ -8,6 +8,7 @@ let timerGuardado = null;
 let guardando = Promise.resolve();
 let eventos = null;
 let sesionPrueba = nuevaSesion();
+let estadoPrueba = null; // estado donde está la charla de prueba, se resalta en el lienzo
 
 function nuevaSesion() { return Math.random().toString(36).slice(2); }
 const nuevoId = () => (crypto.randomUUID ? crypto.randomUUID() : nuevaSesion() + Date.now().toString(36));
@@ -90,7 +91,7 @@ function guardar() {
       await api('PUT', `/api/bots/${id}`, datos);
       if (id === botId) $('#saved').textContent = 'Guardado';
       const b = bots.find(b => b.id === id);
-      if (b) { b.nombre = datos.agente.nombre; pintarLista(); }
+      if (b) { b.nombre = datos.agente.nombre; }
     } catch (err) {
       $('#saved').textContent = `No se guardó: ${err.message}`;
     }
@@ -120,7 +121,6 @@ function refrescarDerivados() {
   const nombre = form.elements['agente.nombre'].value.trim() || 'Asistente';
   $('#tName').textContent = nombre;
   $('#tAvatar').textContent = nombre[0].toUpperCase();
-  $('#crumb').textContent = nombre;
 }
 
 async function revisarLLM() {
@@ -272,7 +272,8 @@ const GRID = 20, NODO_W = 220, CAB_H = 56, SAL_H = 30, COL = 300, SEP = 40;
 const vista = { x: 40, y: 40, z: 1 };
 let ajustarAlMostrar = true;
 const snap = v => Math.round(v / GRID) * GRID;
-const filasDe = n => (n.tipo === 'accion' ? [] : n.salidas) || [];
+const terminal = n => n.tipo === 'accion' || n.tipo === 'salto';
+const filasDe = n => (terminal(n) ? [] : n.salidas) || [];
 const altoNodo = n => CAB_H + filasDe(n).length * SAL_H;
 
 // Ubica en columnas por profundidad; las hojas se apilan y el padre queda centrado en sus destinos.
@@ -345,7 +346,7 @@ function ajustar() {
   const minY = Math.min(...nodos.map(n => n.pos.y)), maxY = Math.max(...nodos.map(n => n.pos.y + altoNodo(n)));
   const libreDer = $('#nodoEditor').hidden ? 0 : 360;
   const w = flow.width - libreDer - 80, h = flow.height - 100;
-  vista.z = Math.min(1, Math.max(0.3, Math.min(w / (maxX - minX), h / (maxY - minY))));
+  vista.z = Math.min(2, Math.max(0.3, Math.min(w / (maxX - minX), h / (maxY - minY))));
   vista.x = 40 + (w - (maxX - minX) * vista.z) / 2 - minX * vista.z;
   vista.y = 40 + (h - (maxY - minY) * vista.z) / 2 - minY * vista.z;
   aplicarVista();
@@ -426,6 +427,7 @@ function conectar(origen, salidaId, destino) {
 
 function resumenNodo(n) {
   if (n.tipo === 'accion') return n.accion ? resumenAccion(n.accion) : 'Elegí qué hace';
+  if (n.tipo === 'salto') return n.objetivo ? `Va a ${n.objetivo}` : 'Elegí a qué estado va';
   const mensajes = n.mensajes || [];
   if (!mensajes.length) return 'Sin mensajes';
   return resumenMensaje(mensajes[0]) + (mensajes.length > 1 ? ` · +${mensajes.length - 1}` : '');
@@ -460,17 +462,17 @@ function renderArbol() {
   const rutas = caminos();
   const divs = nodos.map(n => {
     const esRaiz = n.id === 'inicio';
-    const esAccion = n.tipo === 'accion';
-    const salidas = esAccion ? [] : n.salidas || [];
+    const esAccion = n.tipo === 'accion', esSalto = n.tipo === 'salto';
+    const salidas = terminal(n) ? [] : n.salidas || [];
     const dups = repetidas(n);
-    const div = el('div', { class: `fnode${esAccion ? ' accion' : ''}${dups.size ? ' con-error' : ''}${rutas.has(n.id) ? '' : ' suelto'}${n.id === seleccionado ? ' sel' : marcados.has(n.id) ? ' marcado' : ''}` },
+    const div = el('div', { class: `fnode${esAccion ? ' accion' : esSalto ? ' salto' : ''}${n.id === estadoPrueba ? ' actual' : ''}${dups.size ? ' con-error' : ''}${rutas.has(n.id) ? '' : ' suelto'}${n.id === seleccionado ? ' sel' : marcados.has(n.id) ? ' marcado' : ''}` },
       el('div', { class: 'fhead' },
         esRaiz ? el('span', { class: 'num' }, '★') : el('span', { class: 'port in', title: 'Soltá acá una salida para conectar' }),
-        esAccion ? el('span', { class: 'num' }, '⚙') : null,
+        esAccion ? el('span', { class: 'num' }, '⚙') : esSalto ? el('span', { class: 'num' }, '↪') : null,
         el('span', { class: 'txt' },
           el('b', { class: !esRaiz && !n.nombre ? 'vacio' : '' }, nombreDe(n)),
           el('small', {}, resumenNodo(n))),
-        esAccion || salidas.length > 1 ? null : el('span', { class: 'port out nueva', title: 'Arrastrá hasta un estado para agregar una respuesta' })),
+        terminal(n) || salidas.length > 1 ? null : el('span', { class: 'port out nueva', title: 'Arrastrá hasta un estado para agregar una respuesta' })),
       salidas.length ? el('ul', { class: 'fsal' }, ...salidas.map(s => el('li', {
         class: `${nodo(s.destino) ? '' : 'libre'}${dups.has(s.id) ? ' dup' : ''}`, 'data-salida': s.id,
         title: dups.has(s.id) ? `Repetida: otra respuesta también escucha "${dups.get(s.id)}"` : '' },
@@ -485,13 +487,13 @@ function renderArbol() {
       const confirmando = confirmarTacho === n.id;
       const filas = filasDe(n).length;
       const quitar = confirmando ? 'Confirmar'
-        : filas ? 'Quitar la última respuesta' : (esAccion ? 'Eliminar acción' : 'Eliminar estado');
-      const tacho = el('button', { type: 'button', class: `add del${confirmando ? ' confirmar' : ''}${esAccion ? ' solo' : ''}`, title: quitar, 'aria-label': quitar, onclick: () => quitarUltima(n) });
+        : filas ? 'Quitar la última respuesta' : (esAccion ? 'Eliminar acción' : esSalto ? 'Eliminar salto' : 'Eliminar estado');
+      const tacho = el('button', { type: 'button', class: `add del${confirmando ? ' confirmar' : ''}${terminal(n) ? ' solo' : ''}`, title: quitar, 'aria-label': quitar, onclick: () => quitarUltima(n) });
       if (esRaiz && !filas) tacho.disabled = true;
       tacho.innerHTML = confirmando ? ICONO_OK : ICONO_TACHO;
       div.append(tacho);
       // Un nodo de acción es terminal: no tiene respuestas para agregar
-      if (!esAccion) div.append(el('button', { type: 'button', class: 'add', title: 'Agregar respuesta', 'aria-label': 'Agregar respuesta', onclick: () => agregarSalida(n) }, '+'));
+      if (!terminal(n)) div.append(el('button', { type: 'button', class: 'add', title: 'Agregar respuesta', 'aria-label': 'Agregar respuesta', onclick: () => agregarSalida(n) }, '+'));
     }
     return div;
   });
@@ -540,12 +542,16 @@ function renderArbol() {
   };
   // Estado bajo el puntero con el que se conecta el gesto actual
   const destinoDe = e => {
-    const id = document.elementFromPoint(e.clientX, e.clientY)?.closest('.fnode')?.dataset.id;
+    const bajo = document.elementFromPoint(e.clientX, e.clientY);
+    const id = bajo?.closest('.fnode')?.dataset.id;
     const otro = id && nodo(id);
     if (!otro || otro === gesto.nodo) return null;
     if ((gesto.desdeSalida ? otro : gesto.nodo).id === 'inicio') return null;
-    if ((gesto.desdeSalida ? gesto.nodo : otro).tipo === 'accion') return null;
-    return gesto.desdeSalida ? { origen: gesto.nodo, destino: otro } : { origen: otro, destino: gesto.nodo };
+    if (terminal(gesto.desdeSalida ? gesto.nodo : otro)) return null;
+    if (gesto.desdeSalida) return { origen: gesto.nodo, destino: otro };
+    // Soltado sobre una respuesta concreta: se reconecta esa en vez de agregar una nueva
+    const salida = bajo.closest('[data-salida]')?.dataset.salida || null;
+    return { origen: otro, destino: gesto.nodo, salida };
   };
 
   function moverConexion(e) {
@@ -556,7 +562,11 @@ function renderArbol() {
     gesto.temp.setAttribute('d', d);
     const destino = destinoDe(e);
     const destinoId = destino && (gesto.desdeSalida ? destino.destino : destino.origen).id;
-    $$('.fnode').forEach(f => f.classList.toggle('destino', f.dataset.id === destinoId));
+    // Sobre una respuesta concreta se resalta solo esa; si no, el estado entero (agregaría una nueva)
+    const salidaId = destino?.salida;
+    $$('.fnode').forEach(f => f.classList.toggle('destino', f.dataset.id === destinoId && !salidaId));
+    $$('.fsal li').forEach(li => li.classList.toggle('destino',
+      !!salidaId && li.dataset.salida === salidaId && li.closest('.fnode').dataset.id === destinoId));
   }
 
   flow.addEventListener('pointermove', e => {
@@ -586,7 +596,7 @@ function renderArbol() {
     gesto = null;
     flow.classList.remove('panning', 'conectando');
     if (g.tipo === 'conectar') {
-      if (destino) conectar(destino.origen, g.desdeSalida ? g.salida : null, destino.destino);
+      if (destino) conectar(destino.origen, g.desdeSalida ? g.salida : destino.salida, destino.destino);
       else if (g.desdeSalida && e.type === 'pointerup') {
         // Soltado en el vacío: crea un estado nuevo ahí y lo conecta
         const nuevo = nodoVacio('estado');
@@ -626,9 +636,9 @@ function renderArbol() {
   $('#zoomIn').onclick = () => zoom(1.2);
   $('#zoomOut').onclick = () => zoom(1 / 1.2);
   $('#flowFit').onclick = ajustar;
-  $('#flowOrdenar').onclick = () => { ordenar(); cambio(); renderArbol(); ajustar(); };
   $('#flowNuevo').onclick = () => agregarNodo('estado');
   $('#flowNuevaAccion').onclick = () => agregarNodo('accion');
+  $('#flowNuevoSalto').onclick = () => agregarNodo('salto');
 })();
 
 function seleccionar(id) {
@@ -683,9 +693,18 @@ function editarNombreEnLienzo(n) {
   input.select();
 }
 
-const nodoVacio = (tipo = 'estado') => tipo === 'accion'
-  ? { id: nuevoId(), tipo, nombre: '', accion: null }
-  : { id: nuevoId(), tipo, nombre: '', mensajes: [{ tipo: 'texto', texto: '' }], salidas: [], formatoOpciones: 'lista' };
+// Nombre por defecto: "Estado n", "Acción n" o "Salto n", con n el primer número libre después de los de ese tipo
+const NOMBRES = { estado: 'Estado', accion: 'Acción', salto: 'Salto' };
+const tipoDe = n => NOMBRES[n.tipo] ? n.tipo : 'estado';
+function nombreNuevo(tipo) {
+  let i = nodos.filter(n => n.id !== 'inicio' && tipoDe(n) === tipo).length + 1;
+  while (nodos.some(n => n.nombre === `${NOMBRES[tipo]} ${i}`)) i++;
+  return `${NOMBRES[tipo]} ${i}`;
+}
+
+const nodoVacio = (tipo = 'estado') => tipo === 'accion' ? { id: nuevoId(), tipo, nombre: nombreNuevo(tipo), accion: null }
+  : tipo === 'salto' ? { id: nuevoId(), tipo, nombre: nombreNuevo(tipo), objetivo: '' }
+  : { id: nuevoId(), tipo, nombre: nombreNuevo(tipo), mensajes: [{ tipo: 'texto', texto: '' }], salidas: [], formatoOpciones: 'lista' };
 
 // Un estado manda varios mensajes, en orden
 function editorMensajes(n) {
@@ -866,6 +885,29 @@ function encabezadosDe(a) {
   return Array.from(encabezados, (v, i) => v || String.fromCharCode(65 + i));
 }
 
+// Vista previa de solo lectura con aspecto de Google Sheets: letras de columna, números de fila y pestañas de hoja
+function vistaPlanilla(p) {
+  const caja = el('div', { class: 'preview' }, el('small', {}, 'Cargando…'));
+  const letra = i => String.fromCharCode(65 + i);
+  const cargar = async hoja => {
+    try {
+      const d = await api('GET', `/api/planillas/${p.id}/preview${hoja ? `?hoja=${encodeURIComponent(hoja)}` : ''}`);
+      const { hojas } = d;
+      const cols = Math.max(8, ...d.filas.map(f => f.length));
+      const filas = Math.max(10, d.filas.length);
+      const tabla = el('table', {},
+        el('tr', {}, el('th', {}), ...Array.from({ length: cols }, (_, i) => el('th', {}, letra(i)))),
+        ...Array.from({ length: filas }, (_, r) => el('tr', {}, el('th', {}, String(r + 1)),
+          ...Array.from({ length: cols }, (_, i) => el('td', {}, d.filas[r]?.[i] ?? '')))));
+      const tabs = el('div', { class: 'preview-tabs' }, ...hojas.map(h =>
+        el('button', { type: 'button', class: h === d.hoja ? 'on' : '', onclick: () => cargar(h) }, h)));
+      caja.replaceChildren(el('div', { class: 'preview-tabla' }, tabla), tabs);
+    } catch (err) { caja.replaceChildren(el('small', { class: 'mal' }, err.message)); }
+  };
+  cargar();
+  return caja;
+}
+
 async function pintarPlanillas() {
   const lista = $('#planillasLista'), estado = $('#planillasEstado');
   estado.className = 'help';
@@ -882,7 +924,7 @@ async function pintarPlanillas() {
           el('span', { class: p.acciones ? 'uso' : 'sin-uso' }, p.acciones
             ? `Referenciada por ${p.acciones} ${p.acciones === 1 ? 'acción' : 'acciones'} (${p.agentes.join(', ')})`
             : 'Sin acciones que la usen'))),
-      el('a', { href: p.url, target: '_blank', rel: 'noopener', class: 'btn btn-outline btn-sm' }, 'Abrir ↗'))));
+      el('a', { href: p.url, target: '_blank', rel: 'noopener', class: 'btn btn-outline btn-sm' }, 'Abrir ↗'), vistaPlanilla(p))));
   } catch {
     estado.className = 'help mal';
     estado.textContent = planillasError;
@@ -1093,7 +1135,7 @@ function renderDetalle() {
   const cerrar = el('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Cerrar', onclick: cerrarDetalle }, '×');
   const actual = el('b', { class: 'ruta-actual' }, nombreDe(n));
   const lapiz = el('button', { type: 'button', class: 'lapiz', title: 'Cambiar nombre', 'aria-label': 'Cambiar nombre', onclick: () => {
-    const etiqueta = n.tipo === 'accion' ? 'Nombre de la acción' : 'Nombre del estado';
+    const etiqueta = n.tipo === 'accion' ? 'Nombre de la acción' : n.tipo === 'salto' ? 'Nombre del salto' : 'Nombre del estado';
     const input = el('input', { class: 'ruta-input', value: n.nombre || '', placeholder: etiqueta, 'aria-label': etiqueta });
     input.addEventListener('input', () => { n.nombre = input.value; editado(); });
     input.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === 'Escape') input.blur(); });
@@ -1112,6 +1154,30 @@ function renderDetalle() {
 
   const eliminar = el('div', { class: 'nodo-actions' },
     el('button', { type: 'button', class: 'btn btn-ghost btn-sm btn-danger', onclick: () => eliminarEstado(n) }, 'Eliminar'));
+
+  if (n.tipo === 'salto') {
+    const nombres = [...new Set(nodos.filter(x => !terminal(x) && (x.id === 'inicio' || x.nombre)).map(nombreDe))];
+    const lista = el('datalist', { id: `saltos-${n.id}` }, ...nombres.map(v => el('option', { value: v })));
+    const objetivo = el('input', { value: n.objetivo || '', list: lista.id, placeholder: 'Nombre del estado', 'aria-label': 'Estado al que salta' });
+    const aviso = el('p', { class: 'help' });
+    const revisar = () => {
+      const ok = nombres.some(v => normalizar(v) === normalizar(objetivo.value));
+      aviso.textContent = !objetivo.value.trim() ? '' : ok ? '' : `No hay ningún estado llamado "${objetivo.value.trim()}": la charla va a responder como si no hubiera entendido.`;
+    };
+    objetivo.addEventListener('input', () => { n.objetivo = objetivo.value; editado(); revisar(); });
+    revisar();
+    panel.replaceChildren(...[
+      el('div', { class: 'nodo-top' }, ruta, cerrar),
+      el('p', { class: 'help' }, 'Nodo de salto: cuando el cliente llega acá, la charla sigue en el estado con este nombre, como si hubiera elegido llegar ahí.'),
+      !camino ? el('p', { class: 'help' }, 'Ninguna respuesta lleva a este salto. Arrastrá el punto de una respuesta de un estado hasta acá.') : null,
+      otros.length ? el('p', { class: 'help' }, 'También se llega desde: ',
+        ...otros.flatMap((p, i) => [i ? ', ' : '', el('button', { type: 'button', class: 'link', onclick: () => seleccionar(p.id) }, nombreDe(p))])) : null,
+      el('label', {}, 'Salta al estado'),
+      objetivo, lista, aviso,
+      eliminar,
+    ].filter(Boolean));
+    return;
+  }
 
   if (n.tipo === 'accion') {
     panel.replaceChildren(...[
@@ -1146,6 +1212,7 @@ function renderDetalle() {
 function cargarFlujo(f) {
   nodos = structuredClone(f?.nodos || []);
   if (!nodo('inicio')) nodos.unshift({ id: 'inicio', mensajes: [], salidas: [] });
+  for (const n of nodos) if (n.id !== 'inicio' && !n.nombre?.trim()) n.nombre = nombreNuevo(tipoDe(n));
   if (nodos.some(n => !n.pos)) ordenar();
   if (!nodo(seleccionado)) seleccionado = null;
   renderArbol();
@@ -1156,7 +1223,7 @@ function cargarFlujo(f) {
 /* ---------- Secciones ---------- */
 function mostrarSeccion(sec) {
   const s = $(`.sec[data-sec="${sec}"]`);
-  if (!s || $(`.sections button[data-sec="${sec}"]`)?.disabled) sec = 'comportamiento';
+  if (!s || $(`.sections button[data-sec="${sec}"]`)?.disabled) sec = 'respuestas';
   $$('.sec').forEach(s => (s.hidden = s.dataset.sec !== sec));
   $$('.sections button').forEach(b => b.setAttribute('aria-current', String(b.dataset.sec === sec)));
   if (location.hash.slice(1) !== sec) history.replaceState(null, '', `#${sec}`);
@@ -1167,27 +1234,34 @@ function mostrarSeccion(sec) {
 $$('.sections button').forEach(b => (b.onclick = () => mostrarSeccion(b.dataset.sec)));
 
 /* ---------- Agentes ---------- */
-function pintarLista() {
-  $('#botList').replaceChildren(...bots.map(b => {
-    const btn = el('button', { type: 'button', onclick: () => abrirBot(b.id) },
-      el('span', { class: 'dot' }), el('span', { class: 'name' }, b.nombre || 'Asistente'));
-    btn.setAttribute('aria-current', String(b.id === botId));
-    btn.firstChild.dataset.estado = b.estado || 'desconectado';
-    return el('li', {}, btn);
-  }));
+function mostrarTester(abierto) {
+  $('.app').classList.toggle('tester-cerrado', !abierto);
+  $('.tester-head').inert = $('.phone').inert = !abierto;
+  const t = $('#tToggle'), txt = abierto ? 'Ocultar vista previa' : 'Mostrar vista previa';
+  t.title = txt; t.setAttribute('aria-label', txt); t.setAttribute('aria-expanded', abierto);
+  if (abierto) $('#tInput').focus({ preventScroll: true });
+  dibujarConectores();
 }
+$('#abrirProbar').onclick = () => mostrarTester(true);
+$('#tToggle').onclick = () => mostrarTester($('.app').classList.contains('tester-cerrado'));
+$('.app').addEventListener('transitionend', e => { if (e.target === e.currentTarget) dibujarConectores(); });
 
 async function abrirBot(id) {
   await guardarPendiente();
   const bot = await api('GET', `/api/bots/${id}`);
   botId = bot.id;
   guardarLocal('botId', botId);
+  $('.app').classList.add('probando');
+  mostrarSeccion($('.sections button[aria-current="true"]')?.dataset.sec);
   llenarForm(bot);
-  pintarEstado(bot.estado || { estado: 'desconectado' });
+  pintarEstado({ estado: 'desconectado', proveedor: bot.conexion?.proveedor, ...bot.estado });
+  // Con WhatsApp personal, si está desconectado se conecta solo: retoma la sesión recordada o muestra el QR
+  if ((bot.estado?.estado || 'desconectado') === 'desconectado' && bot.conexion?.proveedor === 'baileys') {
+    api('POST', `/api/bots/${bot.id}/conectar`).then(r => { if (botId === bot.id) pintarEstado(r); }).catch(() => {});
+  }
   reiniciarConvs();
   reiniciarChat(false);
   $('#saved').textContent = '';
-  pintarLista();
   escucharEventos();
   if (!$('.sec[data-sec="metricas"]').hidden) cargarMetricas();
 }
@@ -1196,23 +1270,41 @@ async function crearAgente() {
   await guardarPendiente();
   const bot = await api('POST', '/api/bots', {});
   bots.push({ id: bot.id, nombre: bot.agente.nombre, estado: 'desconectado' });
-  $('.app').classList.remove('sin-agentes');
   await abrirBot(bot.id);
   mostrarSeccion('comportamiento');
   form.elements['agente.nombre'].select();
 }
-$('#nuevoBot').onclick = crearAgente;
-$('#crearPrimerAgente').onclick = crearAgente;
 
-// Sin agentes: se oculta el editor y se invita a crear uno
-function mostrarSinAgentes() {
-  botId = null;
-  eventos?.close();
-  $('.app').classList.add('sin-agentes');
-  $('#crumb').textContent = '';
-  $('#saved').textContent = '';
-  pintarLista();
+/* ---------- Descargar el agente ---------- */
+async function prepararDescarga() {
+  const disponibles = await api('GET', '/api/descargas').catch(() => []);
+  for (const a of $$('.descarga a[data-plataforma]')) {
+    const ok = disponibles.includes(a.dataset.plataforma);
+    a.setAttribute('aria-disabled', String(!ok));
+    if (!ok) a.title = 'Todavía no está disponible';
+    a.onclick = async e => {
+      e.preventDefault();
+      await guardarPendiente();
+      location.href = `/api/bots/${botId}/descargar?plataforma=${a.dataset.plataforma}`;
+    };
+  }
 }
+
+/* ---------- Estado del servidor ---------- */
+// Verde: responde bien · amarillo: lento o avisado como degradado · rojo: no responde o avisado como caído
+const TEXTOS_SERVIDOR = { operativo: 'Servidores operativos', degradado: 'Servidores bajo carga', caido: 'Sin contacto con servidores' };
+async function revisarServidor() {
+  const t0 = performance.now();
+  let estado = 'caido';
+  try {
+    const res = await fetch('/api/estado', { cache: 'no-store', signal: AbortSignal.timeout(8000) });
+    if (res.ok) estado = (await res.json()).estado;
+    if (estado === 'operativo' && performance.now() - t0 > 2000) estado = 'degradado';
+  } catch {}
+  $('#servidor').dataset.estado = estado;
+  $('#servidorTexto').textContent = TEXTOS_SERVIDOR[estado] || TEXTOS_SERVIDOR.operativo;
+}
+setInterval(revisarServidor, 30000);
 
 /* ---------- Borrar agente ---------- */
 (() => {
@@ -1246,8 +1338,7 @@ function mostrarSinAgentes() {
       bots = bots.filter(b => b.id !== botId);
       botId = null;
       cerrar();
-      if (bots.length) await abrirBot(bots[0].id);
-      else mostrarSinAgentes();
+      await crearAgente();
     } catch (err) {
       error.textContent = `No se pudo borrar: ${err.message}`;
       error.hidden = false;
@@ -1257,22 +1348,27 @@ function mostrarSinAgentes() {
 })();
 
 /* ---------- Conexión ---------- */
-const ETIQUETAS = { desconectado: 'Desconectado', conectando: 'Conectando…', esperando_qr: 'Esperando QR', conectado: 'Conectado', error: 'Error' };
+const ETIQUETAS = { desconectado: 'Desconectado', conectando: 'Desconectado', esperando_qr: 'Desconectado', conectado: 'Conectado', error: 'Error' };
 
 function pintarEstado(s) {
   for (const pill of [$('#pill'), $('#pill2')]) {
-    pill.dataset.estado = s.estado;
+    pill.dataset.estado = ['conectando', 'esperando_qr'].includes(s.estado) ? 'desconectado' : s.estado;
     pill.textContent = ETIQUETAS[s.estado] || s.estado;
   }
   $('#statusDetail').textContent = s.estado === 'conectado' && s.numero ? `Respondiendo en +${s.numero}` : s.detalle || '';
-  $('#qrBox').hidden = !(s.estado === 'esperando_qr' && s.qr);
-  if (s.qr) $('#qrImg').src = s.qr;
-  const activo = s.estado !== 'desconectado' && s.estado !== 'error';
+  const mostrarQR = s.qr && (s.estado === 'esperando_qr' || s.estado === 'desconectado');
+  $('#qrBoxConexion').hidden = !(mostrarQR && s.proveedor === 'baileys');
+  if (s.qr) {
+    $('#qrImgConexion').src = s.qr;
+  }
+  const activo = s.estado === 'conectado';
+  const baileys = s.proveedor === 'baileys';
   $('#btnConectar').hidden = activo;
   $('#btnDesconectar').hidden = !activo;
-  $('#btnLogout').hidden = !(activo && s.proveedor === 'baileys');
+  // Con sesión recordada solo se ofrece desvincular; sin sesión se muestra el QR
+  $('#btnLogout').hidden = !(baileys && (s.estado === 'conectado' || s.estado === 'error'));
   const b = bots.find(b => b.id === botId);
-  if (b && b.estado !== s.estado) { b.estado = s.estado; pintarLista(); }
+  if (b && b.estado !== s.estado) { b.estado = s.estado; }
 }
 
 const convs = new Map(); // chatId -> { nombre, msgs, leido }
@@ -1346,6 +1442,7 @@ $('#btnDesconectar').onclick = e => accion(e.currentTarget, () => api('POST', `/
 $('#btnLogout').onclick = e => accion(e.currentTarget, async () => {
   if (!confirm('¿Desvincular este número? Para volver a conectarlo hay que escanear el QR de nuevo.')) return;
   await api('POST', `/api/bots/${botId}/desconectar`, { cerrarSesion: true });
+  pintarEstado(await api('POST', `/api/bots/${botId}/conectar`));
 });
 
 /* ---------- Métricas ---------- */
@@ -1409,14 +1506,18 @@ async function cargarMetricas() {
     ? m.top.map(t => el('tr', {}, el('td', {}, t.titulo), el('td', {}, fmt(t.usos))))
     : [el('tr', {}, el('td', { class: 'help' }, 'Sin datos todavía'), el('td'))]));
 }
-$('#refMetricas').onclick = cargarMetricas;
+setInterval(() => { if (!document.hidden && !$('.sec[data-sec="metricas"]').hidden) cargarMetricas(); }, 500);
 
 /* ---------- Probador ---------- */
 const chat = $('#chat');
 const bajar = () => (chat.scrollTop = chat.scrollHeight);
 
+const horaChat = () => new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+
 function burbuja(clase, ...contenido) {
-  const b = el('div', { class: `msg ${clase}` }, ...contenido);
+  const conHora = /^(yo|bot)$/.test(clase);
+  const b = el('div', { class: `msg ${clase}` }, ...contenido,
+    conHora ? el('span', { class: 'wa-hora' }, horaChat(), clase === 'yo' ? el('i', { class: 'wa-check', 'aria-hidden': 'true' }) : null) : null);
   chat.append(b);
   bajar();
   return b;
@@ -1472,6 +1573,8 @@ function reiniciarChat(avisarServer = true) {
   if (avisarServer && botId) api('POST', `/api/bots/${botId}/probar`, { reiniciar: true, sesion: sesionPrueba }).catch(() => {});
   sesionPrueba = nuevaSesion();
   chat.replaceChildren();
+  estadoPrueba = null;
+  renderArbol();
 }
 
 $('#composer').onsubmit = async e => {
@@ -1480,8 +1583,10 @@ $('#composer').onsubmit = async e => {
   const texto = input.value.trim();
   if (!texto || !botId) return;
   input.value = '';
+  input.dispatchEvent(new Event('input'));
   burbuja('yo', texto);
-  const esperando = burbuja('bot escribiendo', 'escribiendo…');
+  const esperando = burbuja('bot escribiendo', el('i'), el('i'), el('i'));
+  $('#tEstado').textContent = 'escribiendo…';
   try {
     await guardarPendiente();
     const res = await api('POST', `/api/bots/${botId}/probar`, { texto, sesion: sesionPrueba });
@@ -1489,13 +1594,34 @@ $('#composer').onsubmit = async e => {
     res.mensajes.forEach(mostrarMensaje);
     (res.acciones || []).forEach(a => burbuja(`accion${a.ok ? '' : ' fallo'}`, `${a.ok ? '⚙' : '⚠'} ${a.detalle}`));
     chat.append(el('div', { class: 'fuente' }, ...etiquetaFuente(res)));
+    estadoPrueba = res.respuestaId || res.nodoActual;
+    renderArbol();
   } catch (err) {
+    esperando.className = 'msg bot';
     esperando.textContent = `No pude responder: ${err.message}`;
   }
+  $('#tEstado').textContent = 'en línea';
   bajar();
 };
 
 $('#tReset').onclick = () => reiniciarChat();
+
+// Cursor propio: el nativo no deja cambiarle el alto
+{
+  const input = $('#tInput'), caret = $('#tCaret');
+  const ctx = document.createElement('canvas').getContext('2d');
+  const mover = () => {
+    const sel = input.selectionStart === input.selectionEnd;
+    caret.hidden = document.activeElement !== input || !sel;
+    if (caret.hidden) return;
+    ctx.font = getComputedStyle(input).font;
+    const x = ctx.measureText(input.value.slice(0, input.selectionStart)).width - input.scrollLeft;
+    caret.style.left = `${input.offsetLeft + Math.min(x, input.clientWidth)}px`;
+    caret.style.animation = 'none'; caret.offsetWidth; caret.style.animation = '';
+  };
+  ['input', 'keyup', 'click', 'focus', 'blur', 'select'].forEach(ev => input.addEventListener(ev, mover));
+  document.addEventListener('selectionchange', () => document.activeElement === input && mover());
+}
 
 /* ---------- Inicio ---------- */
 $('#salir').onclick = async () => {
@@ -1527,14 +1653,19 @@ async function iniciar() {
   $('#usuarioNombre').textContent = yo.nombre || yo.email;
   if (yo.foto) $('#usuarioFoto').src = yo.foto;
   bots = await api('GET', '/api/bots');
-  const pedido = new URLSearchParams(location.search).get('bot') || leer('botId');
+  const porUrl = new URLSearchParams(location.search).get('bot');
+  const pedido = porUrl || leer('botId');
   const id = bots.find(b => b.id === pedido)?.id || bots[0]?.id;
   const google = new URLSearchParams(location.search).get('google');
   if (location.search) history.replaceState(null, '', location.pathname + location.hash);
   pintarGoogle(google === 'error' ? 'No se pudo conectar la cuenta de Google. Probá de nuevo.' : '');
-  mostrarSeccion(location.hash.slice(1));
+  const sec = location.hash.slice(1);
+  mostrarSeccion(sec);
+  prepararDescarga();
+  revisarServidor();
+  // Con una sección en la URL se vuelve al agente en el que estaba; si no, arranca en el inicio
   if (id) await abrirBot(id);
-  else mostrarSinAgentes();
+  else await crearAgente();
 }
 
 iniciar();

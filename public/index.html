@@ -15,15 +15,14 @@
 
   <!-- Barra superior -->
   <header class="topbar">
-    <a href="/" class="brand" aria-label="Si">
-      <svg class="mark" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <span class="brand" id="irInicio">
+      <a class="brand-si" href="https://sisoftwaresolutions.com" target="_blank" rel="noopener" aria-label="Si soluciones en software"><svg class="mark" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
         <circle cx="50" cy="50" r="46" stroke="currentColor" stroke-width="5"/>
         <text x="50" y="66" text-anchor="middle" font-family="Arial, sans-serif" font-weight="800" font-size="48" fill="currentColor">Si</text>
-      </svg>
-      <span>Agentes</span>
-    </a>
-    <span class="crumb-sep">/</span>
-    <span class="crumb" id="crumb">Nuevo agente</span>
+      </svg><span>Si soluciones en software</span></a>
+      <span class="brand-sep">/</span>
+      <a class="brand-si" href="/">Arma tu agente de Whatsapp</a>
+    </span>
     <span class="saved" id="saved"></span>
     <div class="top-right">
       <span class="pill" id="pill" data-estado="desconectado">Desconectado</span>
@@ -37,35 +36,28 @@
     </div>
   </header>
 
-  <!-- Barra lateral -->
-  <aside class="sidebar">
-    <div class="side-block">
-      <div class="side-title">
-        <span>Mis agentes</span>
-        <button type="button" class="icon-btn" id="nuevoBot" title="Nuevo agente" aria-label="Nuevo agente">+</button>
-      </div>
-      <ul class="bot-list" id="botList"></ul>
+  <!-- Pestañas del agente -->
+  <nav class="tabs" aria-label="Secciones">
+    <ul class="sections">
+      <li><button type="button" data-sec="comportamiento">General</button></li>
+      <li><button type="button" data-sec="respuestas">Respuestas <span class="count" id="respCount"></span></button></li>
+      <li><button type="button" data-sec="conversaciones">Conversaciones <span class="count" id="logCount"></span></button></li>
+      <li><button type="button" data-sec="planillas">Planillas</button></li>
+      <li><button type="button" data-sec="metricas">Métricas</button></li>
+      <li><button type="button" data-sec="negocio" disabled>Negocio <em class="tag">Pronto</em></button></li>
+    </ul>
+    <div class="tabs-right descarga">
+      <a class="servidor" id="servidor" data-estado="operativo" href="https://sisoftwaresolutions.com" target="_blank" rel="noopener">
+        <i aria-hidden="true"></i><span id="servidorTexto">Servidores operativos</span>
+      </a>
+      <span class="help" title="¡No dependas de nuestros servidores! Podés correrlo vos localmente.">Correlo local:
+        <a href="#" data-plataforma="win-x64">Windows</a> · <a href="#" data-plataforma="linux-x64">Linux</a></span>
+      <button type="button" class="btn btn-outline btn-sm" id="abrirProbar">Probar agente</button>
     </div>
-    <nav class="side-block" aria-label="Secciones">
-      <div class="side-title"><span>Configuración</span></div>
-      <ul class="sections">
-        <li><button type="button" data-sec="negocio" disabled>Negocio <em class="tag">Pronto</em></button></li>
-        <li><button type="button" data-sec="comportamiento">General</button></li>
-        <li><button type="button" data-sec="respuestas">Respuestas <span class="count" id="respCount"></span></button></li>
-        <li><button type="button" data-sec="conversaciones">Conversaciones <span class="count" id="logCount"></span></button></li>
-        <li><button type="button" data-sec="planillas">Planillas</button></li>
-        <li><button type="button" data-sec="metricas">Métricas</button></li>
-      </ul>
-    </nav>
-  </aside>
+  </nav>
 
   <!-- Editor -->
   <main class="editor">
-    <div class="sin-agentes-aviso" id="sinAgentes">
-      <h2>No tenés ningún agente</h2>
-      <p>Creá uno para empezar a armar sus respuestas y conectarlo a WhatsApp.</p>
-      <button type="button" class="btn btn-primary" id="crearPrimerAgente">Crear agente</button>
-    </div>
     <form id="form" novalidate autocomplete="off">
 
       <section class="sec" data-sec="negocio" hidden>
@@ -119,11 +111,23 @@
         </div>
         <div class="card">
           <h3>Conexión</h3>
+          <div class="status-line">
+            <span class="pill" id="pill2" data-estado="desconectado">Desconectado</span>
+            <span id="statusDetail" class="help"></span>
+          </div>
           <div class="seg" role="radiogroup">
             <label><input type="radio" name="conexion.proveedor" value="baileys"><span>WhatsApp (QR)</span></label>
             <label class="is-disabled"><input type="radio" name="conexion.proveedor" value="meta" disabled><span>API de Meta <em class="tag">Pronto</em></span></label>
           </div>
           <p class="help" id="provHelp"></p>
+          <div id="qrBoxConexion" class="qr-box" hidden>
+            <img id="qrImgConexion" alt="Código QR para vincular WhatsApp">
+            <ol>
+              <li>Abrí WhatsApp en el celular del negocio.</li>
+              <li><b>Dispositivos vinculados</b> → <b>Vincular un dispositivo</b>.</li>
+              <li>Escaneá el código.</li>
+            </ol>
+          </div>
           <div id="metaFields" class="meta-fields" hidden>
             <div class="row2">
               <label>Phone number ID<input name="conexion.meta.phoneNumberId"></label>
@@ -131,21 +135,6 @@
             </div>
             <label>Access token<input name="conexion.meta.accessToken" type="password"></label>
             <label>Webhook<input id="webhookUrl" readonly></label>
-          </div>
-        </div>
-        <div class="card">
-          <h3>Estado</h3>
-          <div class="status-line">
-            <span class="pill" id="pill2" data-estado="desconectado">Desconectado</span>
-            <span id="statusDetail" class="help"></span>
-          </div>
-          <div id="qrBox" class="qr-box" hidden>
-            <img id="qrImg" alt="Código QR para vincular WhatsApp">
-            <ol>
-              <li>Abrí WhatsApp en el celular del negocio.</li>
-              <li><b>Dispositivos vinculados</b> → <b>Vincular un dispositivo</b>.</li>
-              <li>Escaneá el código.</li>
-            </ol>
           </div>
           <div class="actions">
             <button type="button" class="btn btn-ghost" id="btnLogout" hidden>Desvincular número</button>
@@ -174,10 +163,10 @@
             <button type="button" class="icon-btn" id="zoomOut" aria-label="Alejar">−</button>
             <span id="zoomPct">100%</span>
             <button type="button" class="icon-btn" id="zoomIn" aria-label="Acercar">+</button>
-            <button type="button" class="btn btn-outline btn-sm" id="flowFit">Ajustar</button>
-            <button type="button" class="btn btn-outline btn-sm" id="flowOrdenar">Ordenar</button>
+            <button type="button" class="btn btn-outline btn-sm" id="flowFit">Centrar</button>
             <button type="button" class="btn btn-primary btn-sm" id="flowNuevo">+ Estado</button>
             <button type="button" class="btn btn-outline btn-sm" id="flowNuevaAccion">+ Acción</button>
+            <button type="button" class="btn btn-outline btn-sm" id="flowNuevoSalto">+ Salto</button>
           </div>
           <p class="flow-hint">Arrastrá para mover · Shift+clic para seleccionar varios · Clic en una línea para desconectar · Arrastrá los puntos para conectar</p>
           <div class="card nodo-card" id="nodoEditor" hidden></div>
@@ -196,7 +185,7 @@
             <div class="chat" id="convMsgs"></div>
           </div>
         </div>
-        <p class="empty" id="logEmpty">Todavía no hay mensajes. Conectá el agente y escribile al número.</p>
+        <p class="empty" id="logEmpty">Los mensajes se cargan con el agente conectado</p>
       </section>
 
       <section class="sec" data-sec="planillas" hidden>
@@ -218,7 +207,6 @@
         <div class="sec-head">
           <h2>Métricas</h2>
           <p>Mensajes reales de WhatsApp (la vista previa no cuenta).</p>
-          <button type="button" class="btn btn-outline btn-sm" id="refMetricas">Actualizar</button>
         </div>
         <div class="kpis">
           <div class="kpi"><span>Mensajes recibidos</span><b id="kRecibidos">0</b></div>
@@ -254,16 +242,34 @@
 
   <!-- Probador -->
   <aside class="tester" aria-label="Probar agente">
+    <button type="button" class="tester-toggle" id="tToggle" title="Ocultar vista previa" aria-label="Ocultar vista previa" aria-expanded="true"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M8.6 16.6 13.2 12 8.6 7.4 10 6l6 6-6 6z"/></svg></button>
     <div class="tester-head">
-      <span class="avatar" id="tAvatar">A</span>
-      <div><b id="tName">Asistente</b><small>Vista previa</small></div>
+      <small>Vista previa en WhatsApp</small>
       <button type="button" class="icon-btn" id="tReset" title="Reiniciar conversación" aria-label="Reiniciar conversación">↺</button>
     </div>
-    <div class="chat" id="chat"></div>
-    <form class="composer" id="composer">
-      <input id="tInput" placeholder="Escribí como un cliente…" autocomplete="off">
-      <button type="submit" aria-label="Enviar"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M2 21 23 12 2 3v7l15 2-15 2z"/></svg></button>
-    </form>
+    <div class="phone">
+      <div class="phone-screen">
+        <div class="wa-status" aria-hidden="true"><span>9:41</span><i class="wa-notch"></i><span>▴ ◗ ▮</span></div>
+        <div class="wa-head">
+          <svg class="wa-ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M20 11H7.8l5.6-5.6L12 4l-8 8 8 8 1.4-1.4L7.8 13H20z"/></svg>
+          <span class="avatar" id="tAvatar">A</span>
+          <div><b id="tName">Asistente</b><small id="tEstado">en línea</small></div>
+          <svg class="wa-ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M17 10.5V7a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-3.5l4 4v-11z"/></svg>
+          <svg class="wa-ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M6.6 10.8a15.2 15.2 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.25 11.4 11.4 0 0 0 3.6.57 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.25.2 2.45.57 3.57a1 1 0 0 1-.25 1z"/></svg>
+          <svg class="wa-ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 8a2 2 0 1 0 0-4 2 2 0 0 0 0 4m0 2a2 2 0 1 0 0 4 2 2 0 0 0 0-4m0 6a2 2 0 1 0 0 4 2 2 0 0 0 0-4"/></svg>
+        </div>
+        <div class="chat" id="chat"></div>
+        <form class="composer" id="composer">
+          <div class="wa-input">
+            <svg class="wa-ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20m0 18a8 8 0 1 1 0-16 8 8 0 0 1 0 16m-3.5-9a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3m7 0a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3M12 17.5a5.5 5.5 0 0 0 5.1-3.5H6.9a5.5 5.5 0 0 0 5.1 3.5"/></svg>
+            <input id="tInput" placeholder="Mensaje" autocomplete="off">
+            <i class="wa-caret" id="tCaret" aria-hidden="true" hidden></i>
+            <svg class="wa-ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M16.5 6v11.5a4 4 0 0 1-8 0V5a2.5 2.5 0 0 1 5 0v10.5a1 1 0 0 1-2 0V6H10v9.5a2.5 2.5 0 0 0 5 0V5a4 4 0 0 0-8 0v12.5a5.5 5.5 0 0 0 11 0V6z"/></svg>
+          </div>
+          <button type="submit" aria-label="Enviar"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M2 21 23 12 2 3v7l15 2-15 2z"/></svg></button>
+        </form>
+      </div>
+    </div>
   </aside>
 </div>
 

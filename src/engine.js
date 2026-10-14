@@ -72,6 +72,13 @@ function elegir(nodo, texto, nodos, { numeros = true } = {}) {
   return mejor && nodos.get(mejor.destino);
 }
 
+const estadoLlamado = (nodos, nombre) => {
+  const n = normalizar(nombre);
+  if (!n.trim()) return null;
+  for (const x of nodos.values()) if (x.tipo !== 'salto' && normalizar(x.id === 'inicio' ? x.nombre || 'Inicio' : x.nombre) === n) return x;
+  return n === ' inicio ' ? nodos.get('inicio') : null;
+};
+
 // Mensajes de un estado → mensajes que entiende cualquier proveedor, con las {variables} reemplazadas
 export const renderizar = (nodo, vars = {}) => (nodo.mensajes || []).flatMap(m => renderizarMensaje(conVariables(m, vars)));
 
@@ -154,6 +161,10 @@ export async function responder(bot, chatId, texto, cliente = {}) {
     }
     if (!destino && VOLVER_AL_INICIO.test(t)) { destino = raiz; nivel = 0; }
   }
+
+  // Nodo de salto: la charla sigue en el estado con ese nombre (como si se hubiera llegado directo)
+  for (let saltos = 0; destino?.tipo === 'salto' && saltos < 10; saltos++) destino = estadoLlamado(nodos, destino.objetivo);
+  if (destino?.tipo === 'salto') destino = null;
 
   const vars = { ...variables({ ...cliente, mensaje: texto }), ...chat.vars };
   const mensajes = [];

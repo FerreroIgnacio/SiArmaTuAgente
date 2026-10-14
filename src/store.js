@@ -1,4 +1,5 @@
-import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdirSync } from 'node:fs';
+import { readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,7 +11,8 @@ export const AUTH_DIR = path.join(DATA_DIR, 'auth');
 export const ARCHIVOS_DIR = path.join(DATA_DIR, 'archivos');
 export const METRICAS_DIR = path.join(DATA_DIR, 'metricas');
 
-for (const d of [BOTS_DIR, AUTH_DIR, ARCHIVOS_DIR, METRICAS_DIR]) await mkdir(d, { recursive: true });
+// Sincrónico (sin await de nivel superior) para poder empaquetar el ejecutable local
+for (const d of [BOTS_DIR, AUTH_DIR, ARCHIVOS_DIR, METRICAS_DIR]) mkdirSync(d, { recursive: true });
 
 // flujo: { nodos: [estado] }, el estado 'inicio' es donde arranca la charla. Es una máquina de estados.
 // estado: { id, nombre, mensajes: [mensaje], salidas: [salida], formatoOpciones, pregunta (de la encuesta), pos }
@@ -19,6 +21,7 @@ for (const d of [BOTS_DIR, AUTH_DIR, ARCHIVOS_DIR, METRICAS_DIR]) await mkdir(d,
 // salida: { id, texto, disparadores, destino } → una respuesta que escucha el estado y a qué estado lleva
 //   { id, cualquiera: true, destino } → si lo que escribe no coincide con ninguna, sigue por acá
 // nodo de acción (terminal): { id, tipo: 'accion', nombre, accion, pos } → hace una sola acción (ver acciones.js)
+// nodo de salto (terminal): { id, tipo: 'salto', nombre, objetivo, pos } → la charla sigue en el estado llamado `objetivo`
 // mensaje: { tipo, ...contenido }
 //   tipo 'texto'     → texto
 //   tipo 'imagen'    → url, texto (pie)
@@ -57,7 +60,7 @@ function arbolAFlujo(arbol) {
 // Nodo de un solo mensaje ({ tipo, ...contenido }) → estado con lista de mensajes
 const CONTENIDO = ['tipo', 'texto', 'url', 'nombreArchivo', 'nombre', 'direccion', 'lat', 'lng', 'telefono'];
 function aEstado(n) {
-  if (Array.isArray(n.mensajes) || n.tipo === 'accion') return n;
+  if (Array.isArray(n.mensajes) || n.tipo === 'accion' || n.tipo === 'salto') return n;
   const mensaje = Object.fromEntries(CONTENIDO.filter(k => k in n).map(k => [k, n[k]]));
   const resto = Object.fromEntries(Object.entries(n).filter(([k]) => !CONTENIDO.includes(k)));
   if (n.tipo === 'encuesta') return { ...resto, mensajes: [], formatoOpciones: 'encuesta', pregunta: n.texto || '' };
@@ -68,7 +71,7 @@ function aEstado(n) {
 function aSalidas(nodos) {
   const mapa = new Map(nodos.map(n => [n.id, n]));
   return nodos.map(n => {
-    if (Array.isArray(n.salidas) || n.tipo === 'accion') return n;
+    if (Array.isArray(n.salidas) || n.tipo === 'accion' || n.tipo === 'salto') return n;
     const { hijos = [], titulo, disparadores, ...resto } = n;
     const salidas = hijos.filter(id => mapa.has(id)).map(id => ({
       id: randomUUID(), texto: mapa.get(id).titulo || '', disparadores: mapa.get(id).disparadores || '', destino: id,
