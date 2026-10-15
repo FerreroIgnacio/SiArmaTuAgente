@@ -22,7 +22,8 @@ function estadoChat(clave) {
 
 // Respuestas del estado que llevan a algún lado (las que se pueden elegir)
 // Un estado temporizado no escucha: no tiene respuestas para elegir
-const salidasDe = (nodo, nodos) => nodo.timed ? [] : (nodo.salidas || []).filter(s => !s.tiempo && (s.texto?.trim() || s.cualquiera) && nodos.has(s.destino));
+// Un estado numérico solo escucha un número: su única respuesta es la salida "numero"
+const salidasDe = (nodo, nodos) => nodo.timed ? [] : (nodo.salidas || []).filter(s => !s.tiempo && !s.numero === !nodo.numerico && (s.texto?.trim() || s.cualquiera || s.numero) && nodos.has(s.destino));
 // Estado que no escucha (todas sus salidas desconectadas o sin texto): pasa solo al siguiente tras `espera` segundos.
 // Si no tiene ninguna salida conectada (estado final), tras la espera la charla se reinicia (destino null).
 const autoDe = (nodo, nodos) => {
@@ -33,7 +34,7 @@ const autoDe = (nodo, nodos) => {
     return { destino: nodos.has(d) ? d : null, espera: Math.max(0, Number(nodo.espera ?? 5) || 0) };
   }
   const s = (nodo.salidas || []).find(x => !x.tiempo && nodos.has(x.destino));
-  if (!s && (nodo.id === 'inicio' || nodo.guardarEn)) return null;
+  if (!s && (nodo.id === 'inicio' || nodo.guardarEn || nodo.numerico)) return null;
   return { destino: s?.destino || null, espera: Math.max(0, Number(nodo.espera ?? 5) || 0) };
 };
 // Las que se le muestran al cliente como opciones (con texto, y si el estado las muestra)
@@ -84,6 +85,14 @@ function elegir(nodo, texto, nodos, { numeros = true } = {}) {
     }
   }
   return mejor && nodos.get(mejor.destino);
+}
+
+// Número que escribió el cliente (entero, o decimal con coma o punto) o null si no es válido
+const MSG_NUMERO = 'Por favor, respondé con un número válido.';
+function numeroDe(texto, tipo) {
+  const t = String(texto || '').trim().replace(/\s+/g, '');
+  if (!(tipo === 'decimal' ? /^[+-]?\d+([.,]\d+)?$/ : /^[+-]?\d+$/).test(t)) return null;
+  return String(Number(t.replace(',', '.')));
 }
 
 const estadoLlamado = (nodos, nombre) => {
@@ -155,7 +164,7 @@ export async function responder(bot, chatId, texto, cliente = {}, { avanzar = nu
   const primerMensaje = chat.historial.length === 0;
   const t = normalizar(texto);
 
-  let destino = null, fuente = null, nivel = menus.length;
+  let destino = null, fuente = null, nivel = menus.length, noNumero = false;
   if (avanzar) {
     // Continuación automática: el estado anterior no escucha, así que se pasa directo al siguiente
     destino = nodos.get(avanzar);
@@ -164,6 +173,14 @@ export async function responder(bot, chatId, texto, cliente = {}, { avanzar = nu
     // Si el primer mensaje ya pide una opción de primer nivel, va directo (después del saludo)
     destino = elegir(raiz, texto, nodos, { numeros: false }) || raiz;
     nivel = 1;
+  } else if (actual.numerico && !actual.timed && !VOLVER_AL_INICIO.test(t)) {
+    // Estado numérico: solo sigue si contesta un número válido; si no, se le avisa y se queda acá
+    const num = numeroDe(texto, actual.numerico);
+    noNumero = num === null;
+    if (!noNumero) {
+      if (actual.guardarEn) chat.vars[actual.guardarEn] = num;
+      destino = nodos.get(salidasDe(actual, nodos)[0]?.destino);
+    }
   } else if ((t.trim() === '0' || t === ' volver ') && menus.length > 1) {
     destino = menus.at(-2);
     nivel = menus.length - 2;
@@ -209,14 +226,15 @@ export async function responder(bot, chatId, texto, cliente = {}, { avanzar = nu
     // LLM local (experimental) o mensaje de "no entendí"; el contexto no cambia
     let generado = '';
     // Todavía no está disponible: solo corre si el servidor tiene OLLAMA_URL configurado
-    if (bot.agente.usarLLM && process.env.OLLAMA_URL) {
+    if (!noNumero && bot.agente.usarLLM && process.env.OLLAMA_URL) {
       try {
         generado = await generar(bot, [...chat.historial, { role: 'user', content: texto }]);
       } catch (err) {
         console.error('[llm]', err.message);
       }
     }
-    if (generado) { mensajes.push({ tipo: 'texto', texto: generado }); fuente = 'llm'; }
+    if (noNumero) { mensajes.push({ tipo: 'texto', texto: interpolar(actual.msgNumero?.trim() || MSG_NUMERO, vars) }); fuente = 'sin_coincidencia'; }
+    else if (generado) { mensajes.push({ tipo: 'texto', texto: generado }); fuente = 'llm'; }
     else {
       fuente = 'sin_coincidencia';
       if (bot.agente.fallback) mensajes.push({ tipo: 'texto', texto: bot.agente.fallback });

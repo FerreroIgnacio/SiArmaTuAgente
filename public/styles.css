@@ -194,6 +194,7 @@ input:focus,textarea:focus,select:focus{outline:2px solid rgba(240,125,26,0.35);
 .fnode .fhead{position:relative;height:56px;display:flex;align-items:center;gap:10px;padding:0 14px 0 12px;}
 .fnode .fsal{position:relative;list-style:none;margin:0;padding:0;border-top:1px solid #efe8e1;}
 .fnode .fsal .tapa-reloj{position:absolute;left:2px;right:2px;bottom:4px;margin-top:2px;display:grid;place-items:center;background:rgba(225,220,215,0.65);color:#6f665f;border:1px solid #cfc6be;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.08);z-index:0;cursor:default;}
+.fnode .fsal .tapa-reloj.num{font-weight:700;font-size:15px;cursor:default;}
 .fnode .fsal .tapa-reloj.entra{animation:tapa-entra .2s ease-out;}
 .fnode .fhead .reinicio.apagado{color:#c4bab1;}
 .fnode .fhead .reinicio{cursor:pointer;transform-origin:right center;transition:transform .15s ease-out;}

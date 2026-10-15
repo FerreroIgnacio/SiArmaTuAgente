@@ -278,18 +278,21 @@ let ajustarAlMostrar = true;
 const snap = v => Math.round(v / GRID) * GRID;
 const terminal = n => n.tipo === 'accion' || n.tipo === 'salto';
 // Un estado cuyas salidas están todas desconectadas o sin texto no escucha: pasa solo por la que está conectada
-const escucha = s => !!(s.texto?.trim() || s.cualquiera);
+const escucha = s => !!(s.texto?.trim() || s.cualquiera || s.numero);
 // Sin tiempo y sin respuestas que escuchen, pasa solo por la primera conectada (estados viejos)
 const pasaSola = n => (n.salidas || []).some(s => escucha(s) && nodo(s.destino)) ? null : (n.salidas || []).find(s => !s.tiempo && nodo(s.destino)) || null;
 // Salida por tiempo (output cero): sale siempre del puerto del encabezado; solo se usa si el estado es por tiempo
 const CERO = '__cero';
 const salidaCero = n => terminal(n) ? null : (n.salidas || []).find(s => s.tiempo) || null;
 // Estado final (ninguna salida conectada): tras la espera la charla se reinicia
-const autoFin = n => !terminal(n) && n.id !== 'inicio' && !n.guardarEn && !(n.salidas || []).some(s => (!s.tiempo || n.timed) && nodo(s.destino));
+const autoFin = n => !terminal(n) && n.id !== 'inicio' && !n.guardarEn && !n.numerico && !(n.salidas || []).some(s => (!s.tiempo || n.timed) && nodo(s.destino));
 const esperaDe = n => Math.max(0, Number(n.espera ?? 5) || 0);
 let espera = null; // { nodo, hasta, ms, destino, timer } mientras la charla de prueba espera para pasar sola
 // La salida de un estado que no escucha sale del puerto de la cabecera, no ocupa una fila
-const filasDe = n => terminal(n) ? [] : (n.salidas || []).filter(s => !s.tiempo);
+// La de número (si el estado es numérico) va siempre primera: la tapa cubre las de abajo
+const filasDe = n => terminal(n) ? [] : (n.salidas || []).filter(s => !s.tiempo).sort((a, b) => !!b.numero - !!a.numero);
+// Estado numérico (y no por tiempo, que tiene precedencia): solo escucha la salida de número
+const tapadaNum = (n, s) => !n.timed && n.numerico && !s.numero;
 const altoNodo = n => CAB_H + filasDe(n).length * SAL_H;
 
 // Ubica en columnas por profundidad; las hojas se apilan y el padre queda centrado en sus destinos.
@@ -389,12 +392,19 @@ const svg = (tag, attrs = {}) => {
 let animTiempo = null; // nodo recién tildado como por tiempo: su tapa, su ⏱ y sus líneas entran animados
 let saleTiempo = null; // nodo recién destildado: lo mismo sale animado antes de redibujarlo sin tiempo
 const animTapa = id => animTiempo === id ? ' entra' : saleTiempo === id ? ' sale' : '';
+let animNumero = null, saleNumero = null; // lo mismo para la tapa de un estado numérico
+const animNum = id => animNumero === id ? ' entra' : saleNumero === id ? ' sale' : '';
 
 // Tapa gris con un reloj sobre las salidas que un nodo por tiempo deja apagadas (desde la fila `desde`)
 function tapaReloj(desde, anim) {
   const ic = svg('svg', { viewBox: '0 0 24 24', width: 16, height: 16, fill: 'none', stroke: 'currentColor', 'stroke-width': 2, 'stroke-linecap': 'round' });
   ic.append(svg('circle', { cx: 12, cy: 14, r: 8 }), svg('path', { d: 'M12 14v-4M10 2h4M12 2v4M19 7l1.5-1.5' }));
   return el('div', { class: `tapa-reloj${anim}`, style: `top:${desde * 30}px` }, ic);
+}
+
+// Tapa con un # sobre las respuestas que un estado numérico deja apagadas (debajo de la de número)
+function tapaNumero(anim) {
+  return el('div', { class: `tapa-reloj num${anim}`, style: `top:${SAL_H}px`, title: 'Solo escucha un número' }, '#');
 }
 
 // Centro de un puerto en coordenadas del lienzo. Se mide en el DOM porque los estados tienen alto variable;
@@ -424,7 +434,8 @@ function dibujarConectores() {
       // Nodo por tiempo: la primera salida es la que sigue (más viva), las demás quedan apagadas
       // Sin texto (y sin pasar sola por ella) queda apagada con o sin tiempo: no se anima
       const sinUso = !s.tiempo && !escucha(s) && pasaSola(n) !== s;
-      const tiempo = s.tiempo ? (n.timed ? ' vivo' + animTapa(n.id).replace(' ', ' cero-') : ' apagada') : n.timed ? ' off' + (sinUso ? '' : animTapa(n.id)) : sinUso ? ' apagada' : '';
+      const tiempo = s.tiempo ? (n.timed ? ' vivo' + animTapa(n.id).replace(' ', ' cero-') : ' apagada') : n.timed ? ' off' + (sinUso ? '' : animTapa(n.id))
+        : tapadaNum(n, s) ? ' off' + (sinUso ? '' : animNum(n.id)) : sinUso ? ' apagada' : '';
       g.append(svg('path', { d, class: `${on ? 'on' : ''}${tiempo}${dups.has(s.id) ? ' tapada' : ''}` }), svg('path', { d, class: 'hit' }));
       g.lastChild.append(svg('title'));
       g.lastChild.firstChild.textContent = 'Clic para desconectar';
@@ -525,13 +536,14 @@ function renderArbol() {
         terminal(n) ? null : el('span', { class: `port out cero${n.timed ? animTapa(n.id) : ' apagado'}`, 'data-salida': cero?.id || CERO,
           title: n.timed ? 'Salida por tiempo: arrastrá hasta un estado para conectar' : 'Salida por tiempo (se usa solo si el estado es por tiempo)' })),
       salidas.length ? el('ul', { class: 'fsal' }, ...salidas.map(s => el('li', {
-        class: `${nodo(s.destino) ? '' : 'libre'}${dups.has(s.id) ? ' tapada' : ''}${n.timed ? ' off' + animTapa(n.id) : ''}`, 'data-salida': s.id,
+        class: `${nodo(s.destino) ? '' : 'libre'}${dups.has(s.id) ? ' tapada' : ''}${n.timed ? ' off' + animTapa(n.id) : tapadaNum(n, s) ? ' off' + animNum(n.id) : ''}`, 'data-salida': s.id,
         title: dups.has(s.id) ? `Apagada: una respuesta anterior ya escucha "${dups.get(s.id)}"` : '' },
-        s.cualquiera
+        s.numero ? el('span', { class: 'cualquiera' }, `# ${n.numerico === 'decimal' ? 'Número decimal' : 'Número entero'}${n.guardarEn ? ` → {${n.guardarEn}}` : ''}`)
+        : s.cualquiera
           ? el('span', { class: 'cualquiera' }, `✱ Cualquier respuesta${n.guardarEn ? ` → {${n.guardarEn}}` : ''}`)
           : el('span', { class: s.texto ? '' : 'vacio' }, s.texto || 'Sin texto'),
-        el('span', { class: `port out${!n.timed && !escucha(s) && auto !== s ? ' apagado' : ''}`, 'data-salida': s.id, title: 'Arrastrá hasta un estado para conectar' }))),
-        n.timed ? tapaReloj(0, animTapa(n.id)) : null) : null);
+        el('span', { class: `port out${!n.timed && (!escucha(s) && auto !== s || tapadaNum(n, s)) ? ' apagado' : ''}`, 'data-salida': s.id, title: 'Arrastrá hasta un estado para conectar' }))),
+        n.timed ? tapaReloj(0, animTapa(n.id)) : n.numerico && salidas.length > 1 ? tapaNumero(animNum(n.id)) : null) : null);
     div.style.left = `${n.pos.x}px`;
     div.style.top = `${n.pos.y}px`;
     div.dataset.id = n.id;
@@ -729,7 +741,7 @@ function cerrarDetalle() {
 function editarEnLienzo(n, salidaId) {
   const s = n.salidas?.find(x => x.id === salidaId);
   const li = $(`.fnode[data-id="${n.id}"] .fsal li[data-salida="${salidaId}"]`);
-  if (!s || !li || s.cualquiera) return;
+  if (!s || !li || s.cualquiera || s.numero) return;
   const input = el('input', { class: 'fsal-input', value: s.texto || '', placeholder: 'Qué escucha', 'aria-label': 'Qué escucha' });
   input.addEventListener('input', () => { s.texto = input.value; cambio(); marcarRepetidas(n); });
   input.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === 'Escape') input.blur(); });
@@ -1121,6 +1133,21 @@ function temporizado(n) {
     el('span', { class: `tiempo-seg${activo ? '' : ' off'}` }, seg, 'segundos'));
 }
 
+function alternarNumero(n, tipo) {
+  if (tipo) {
+    if (n.numerico) { n.numerico = tipo; return rehacerTodo(); }
+    (n.salidas ??= []).unshift({ id: nuevoId(), numero: true, destino: null });
+    n.numerico = tipo; animNumero = n.id; rehacerTodo(); animNumero = null; return;
+  }
+  saleNumero = n.id; renderArbol();
+  setTimeout(() => {
+    saleNumero = null;
+    delete n.numerico;
+    n.salidas = (n.salidas || []).filter(s => !s.numero);
+    rehacerTodo();
+  }, 200);
+}
+
 // Estado que pregunta algo: lo que conteste el cliente se guarda en una variable, y la charla sigue
 // por la salida "Cualquier respuesta" (que se agrega sola)
 function guardarEnVariable(n) {
@@ -1217,6 +1244,7 @@ function quitarUltima(n) {
   const filas = filasDe(n);
   if (filas.length) {
     n.salidas.splice(n.salidas.indexOf(filas.at(-1)), 1);
+    if (filas.at(-1).numero) delete n.numerico;
     rehacerTodo();
   } else if (n.id !== 'inicio') {
     eliminarEstado(n);
@@ -1331,7 +1359,8 @@ function renderDetalle() {
     ayudaVariables(),
     guardarEnVariable(n),
     terminal(n) ? null : temporizado(n),
-    ...(!n.timed && filasDe(n).some(s => !s.cualquiera) ? formatoOpciones(n, esRaiz) : []),
+    terminal(n) ? null : numerico(n),
+    ...(!n.timed && !n.numerico && filasDe(n).some(s => !s.cualquiera) ? formatoOpciones(n, esRaiz) : []),
     esRaiz ? null : eliminar,
   ].filter(Boolean));
 }

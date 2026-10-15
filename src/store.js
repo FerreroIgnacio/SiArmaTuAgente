@@ -20,6 +20,8 @@ for (const d of [BOTS_DIR, AUTH_DIR, ARCHIVOS_DIR, METRICAS_DIR]) mkdirSync(d, {
 //   guardarEn: nombre de variable → lo que conteste el cliente en este estado se guarda como {variable}
 // salida: { id, texto, disparadores, destino } → una respuesta que escucha el estado y a qué estado lleva
 //   { id, cualquiera: true, destino } → si lo que escribe no coincide con ninguna, sigue por acá
+//   { id, numero: true, destino } → en un estado con numerico ('entero' | 'decimal') es la única que escucha;
+//     si no manda un número válido se le contesta msgNumero y la charla se queda en el estado
 // nodo de acción (terminal): { id, tipo: 'accion', nombre, accion, pos } → hace una sola acción (ver acciones.js)
 // nodo de salto (terminal): { id, tipo: 'salto', nombre, objetivo, pos } → la charla sigue en el estado llamado `objetivo`
 // mensaje: { tipo, ...contenido }
