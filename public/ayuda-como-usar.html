@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cómo usar la herramienta · Si Arma Tu Agente</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%23d95f02'/%3E%3Ccircle cx='50' cy='50' r='38' stroke='white' stroke-width='5' fill='none'/%3E%3Ctext x='50' y='66' text-anchor='middle' font-family='Arial' font-weight='800' font-size='42' fill='white'%3ESi%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<header class="articulo-top">
+  <span class="brand">
+    <a class="brand-si brand-empresa" href="https://sisoftwaresolutions.com" target="_blank" rel="noopener" aria-label="Si soluciones en software"><svg class="mark" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <circle cx="50" cy="50" r="46" stroke="currentColor" stroke-width="5"/>
+      <text x="50" y="66" text-anchor="middle" font-family="Arial, sans-serif" font-weight="800" font-size="48" fill="currentColor">Si</text>
+    </svg><span>Si soluciones en software</span></a>
+    <span class="brand-sep">/</span>
+    <a class="brand-si" href="/">Arma tu agente</a>
+    <span class="brand-sep">/</span>
+    <a class="brand-si brand-actual" href="" aria-current="page"><span>Cómo usar la herramienta</span></a>
+  </span>
+</header>
+<main class="articulo">
+  <a class="volver" href="/login"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>Volver</a>
+
+  <h1>Cómo usar Arma tu agente</h1>
+  <p class="bajada">De cero a un agente de WhatsApp respondiendo a tus clientes, paso a paso.</p>
+
+  <section>
+  <h2>Qué es</h2>
+  <p>Arma tu agente te deja diseñar, sin programar, cómo responde tu WhatsApp: qué dice, qué pregunta y qué hace según lo que conteste el cliente. Todo se arma en el navegador y el agente funciona mientras tengas la ventana abierta.</p>
+  </section>
+
+  <section id="paso1">
+  <h2><span class="num">1</span>Ingresá y completá los datos de tu negocio</h2>
+  <ul>
+    <li>Ingresá con tu cuenta de Google.</li>
+    <li>En <b>Negocio</b> cargá el nombre, rubro, descripción, horarios y ubicación. El agente <b>solo responde con esto</b>, así que cuanto más claro esté, mejores respuestas.</li>
+    <li>En <b>General</b> poné el nombre del agente y los mensajes por defecto: qué dice si no entiende y qué dice al terminar la conversación.</li>
+  </ul>
+  </section>
+
+  <section id="paso2">
+  <h2><span class="num">2</span>Conectá tu WhatsApp</h2>
+  <ul>
+    <li><b>WhatsApp (QR):</b> abrí WhatsApp en el celular del negocio, entrá a <b>Dispositivos vinculados</b>, tocá <b>Vincular un dispositivo</b> y escaneá el código. Es lo más rápido para empezar.</li>
+    <li><b>API de Meta:</b> para atender clientes reales sin vincular un número por QR. Pide cuatro datos y te explicamos cómo conseguirlos en <a href="/ayuda/api-meta">esta guía</a>.</li>
+    <li>Con <b>Pausar</b> el agente deja de responder cuando quieras, y <b>Desvincular número</b> corta la conexión.</li>
+    <li>Podés activar <b>No responder en grupos</b> para que solo atienda chats individuales.</li>
+  </ul>
+  </section>
+
+  <section id="paso3">
+  <h2><span class="num">3</span>Armá el recorrido de la conversación</h2>
+  <p>En <b>Respuestas</b> ves la conversación como un diagrama. Cada <b>estado</b> manda sus mensajes y escucha respuestas; cada respuesta lleva a otro estado.</p>
+  <ul>
+    <li><b>+ Estado:</b> un punto de la charla, con lo que dice el agente y las respuestas que espera.</li>
+    <li><b>+ Acción:</b> algo que hace el agente en el medio, por ejemplo guardar un dato en una planilla.</li>
+    <li><b>+ Salto:</b> manda la charla a otro punto del flujo sin tener que dibujar una línea larga.</li>
+    <li>Arrastrá para mover, arrastrá los puntos para conectar, hacé clic en una línea para desconectar y usá Shift+clic para seleccionar varios. <b>Centrar</b> te devuelve a la vista general.</li>
+    <li>Un estado final cierra la conversación y manda el mensaje de despedida. Lo mismo pasa si el cliente pasa 10 minutos sin escribir.</li>
+  </ul>
+  </section>
+
+  <section id="paso4">
+  <h2><span class="num">4</span>Usá variables en tus mensajes</h2>
+  <p>En cualquier texto podés escribir <code>{nombre}</code>, <code>{telefono}</code>, <code>{mensaje}</code>, <code>{fecha}</code> y <code>{hora}</code>, y el agente los reemplaza. También podés guardar lo que responde el cliente y reutilizarlo: mirá <a href="/ayuda/variables">cómo definir una variable</a>.</p>
+  </section>
+
+  <section id="paso5">
+  <h2><span class="num">5</span>Probalo antes de publicar</h2>
+  <ul>
+    <li>Tocá <b>Probar agente</b> para chatear con tu agente como si fueras un cliente. Los mensajes de la vista previa no cuentan en las métricas.</li>
+    <li>Ajustá el recorrido hasta que responda como querés.</li>
+  </ul>
+  </section>
+
+  <section id="paso6">
+  <h2><span class="num">6</span>Guardá datos en planillas</h2>
+  <p>En <b>Planillas</b> creás hojas de Google Sheets en tu Drive donde escriben las acciones de tu agente: pedidos, reservas, contactos. Si todavía no conectaste Google, se crea una planilla por defecto.</p>
+  </section>
+
+  <section id="paso7">
+  <h2><span class="num">7</span>Seguí lo que pasa</h2>
+  <ul>
+    <li><b>Conversaciones:</b> los mensajes que entran y lo que responde el agente, en vivo.</li>
+    <li><b>Métricas:</b> mensajes recibidos, conversaciones, porcentaje respondido automáticamente, tiempo de respuesta y las respuestas más usadas.</li>
+  </ul>
+  </section>
+
+  <p class="nota">Si compartís la compu o perdiste un dispositivo, en <b>General &gt; Seguridad</b> podés cerrar la sesión en todos lados.</p>
+</main>
+</body>
+</html>

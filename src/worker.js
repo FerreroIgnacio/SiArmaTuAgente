@@ -240,3 +240,4 @@ export default {
     await borrarCharlasVencidas();
   },
 };
+    if (p === '/ayuda/como-usar') return pagina(req, '/ayuda-como-usar');
