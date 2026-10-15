@@ -407,8 +407,6 @@ select.nueva-accion{color:var(--accent-dark);font-weight:600;}
 .planillas-google{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;}
 .planillas-google[hidden]{display:none;}
 .planillas-google p{margin:0;}
-.sin-google .planilla-nueva,.sin-google #planillasEstado,.sin-google #planillasLista{display:none;}
-.sin-google .planillas-google{margin-bottom:0;}
 .planillas{list-style:none;margin:0;padding:0;display:grid;}
 .planillas li{display:flex;align-items:center;gap:12px;padding:10px 0;border-top:1px solid var(--line);}
 .planillas li:first-child{border-top:none;}

@@ -569,8 +569,7 @@ function erroresAccion(a) {
       si(!a.texto?.trim(), 'Falta el mensaje');
       break;
     case 'sheets':
-      si(googleInfo && !googleInfo.conectado, 'Google no está conectado');
-      si(googleInfo?.conectado && !googleInfo.sheets, 'Faltan permisos de Google');
+      si(googleInfo && !(googleInfo.conectado && googleInfo.sheets), 'Faltan permisos de Google: cerrá sesión y volvé a ingresar');
       si(!a.planilla, 'Falta elegir la planilla');
       si(!(a.columnas || []).some(c => c.columna), 'Faltan las columnas');
       si(a.modo === 'actualizar' && !a.buscarColumna, 'Falta la columna donde buscar');
@@ -1073,7 +1072,7 @@ let planillasError = '';
 let planillasCargando = null;
 const hojasCache = new Map();
 const idDeLink = s => String(s || '').match(/\/d\/([\w-]+)/)?.[1] || '';
-const mensajeGoogle = err => /no está conectada/.test(err.message) ? 'Conectá tu cuenta de Google en General → Integraciones.' : err.message;
+const mensajeGoogle = err => /no está conectada/.test(err.message) ? 'Faltan los permisos de Google: cerrá sesión y volvé a ingresar.' : err.message;
 
 function cargarPlanillas(forzar = false) {
   if (planillasCache && !forzar) return Promise.resolve(planillasCache);
@@ -2069,19 +2068,14 @@ $('#salirTodas').onclick = salir(true);
 /* ---------- Integraciones (cuenta de Google del dueño) ---------- */
 async function pintarGoogle(error = '') {
   const g = await api('GET', '/api/google').catch(() => ({ conectado: false }));
-  const faltan = g.conectado && !g.sheets;
   googleInfo = g;
+  // Con permisos pero sin planillas (se borraron todas), se crea una por defecto
+  if (g.conectado && g.sheets) await cargarPlanillas(true).then(ps => ps.length || crearPlanilla('Registros del agente')).catch(() => {});
   renderArbol();
-  // En Planillas: si falta conectar Google (o sus permisos) se conecta desde ahí mismo
-  $('#planillasGoogle').hidden = g.conectado && g.sheets;
-  $('#planillasGoogle').closest('.card').classList.toggle('sin-google', !(g.conectado && g.sheets));
-  $('#planillasGoogleTexto').textContent = error || (faltan ? 'A tu cuenta de Google le faltan permisos para las planillas.' : 'Conectá tu cuenta de Google para crear y usar planillas.');
-  $('#planillasConectar').textContent = faltan ? 'Volver a conectar' : 'Conectar Google';
   // Al conectar o desconectar Google cambian las planillas disponibles
   planillasCache = null;
   planillasError = '';
 }
-$('#planillasConectar').onclick = async () => { await guardarPendiente(); location.href = '/auth/google/conectar?volver=planillas'; };
 
 async function iniciar() {
   const yo = await api('GET', '/api/yo');
