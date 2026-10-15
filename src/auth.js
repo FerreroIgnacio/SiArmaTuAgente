@@ -69,7 +69,7 @@ export async function rutasAuth(req, url) {
     const esperado = cookies(req).oauth_state;
     const borrarState = setCookie('oauth_state', '', 0);
     const conectando = String(state || '').startsWith('conectar.');
-    const volver = String(state).split('.')[1] === 'planillas' ? 'planillas' : 'comportamiento';
+    const volver = String(state).split('.')[1] === 'planillas' ? 'planillas' : 'general';
     const fallo = conectando ? `/?google=error#${volver}` : '/login.html?error=1';
     if (error || !code || !state || state !== esperado) return redirigir(fallo, [borrarState]);
     try {

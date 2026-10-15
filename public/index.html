@@ -39,8 +39,8 @@
   <!-- Pestañas del agente -->
   <nav class="tabs" aria-label="Secciones">
     <ul class="sections">
-      <li><button type="button" data-sec="comportamiento">General</button></li>
-      <li><button type="button" data-sec="respuestas">Comportamiento <span class="count" id="respCount"></span></button></li>
+      <li><button type="button" data-sec="general">General</button></li>
+      <li><button type="button" data-sec="comportamiento">Comportamiento <span class="count" id="respCount"></span></button></li>
       <li><button type="button" data-sec="conversaciones">Conversaciones <span class="count" id="logCount"></span></button></li>
       <li><button type="button" data-sec="planillas">Planillas</button></li>
       <li><button type="button" data-sec="metricas">Métricas</button></li>
@@ -74,7 +74,7 @@
         </fieldset>
       </section>
 
-      <section class="sec" data-sec="comportamiento" hidden>
+      <section class="sec" data-sec="general" hidden>
         <div class="sec-head">
           <h2>General</h2>
           <p>Cómo se llama, por dónde recibe los mensajes y qué hace cuando no encuentra una respuesta.</p>
@@ -115,6 +115,7 @@
             <label>Webhook<input id="webhookUrl" readonly></label>
           </div>
           <div class="actions">
+            <button type="button" class="btn btn-primary" id="btnConectarMeta" hidden>Conectar</button>
             <button type="button" class="btn btn-ghost" id="btnLogout" hidden>Desvincular número</button>
           </div>
         </div>
@@ -145,7 +146,7 @@
         </div>
       </section>
 
-      <section class="sec sec-flow" data-sec="respuestas" hidden>
+      <section class="sec sec-flow" data-sec="comportamiento" hidden>
         <div class="sec-head">
           <h2>Respuestas</h2>
           <p>El recorrido de la conversación. Cada estado manda sus mensajes y escucha respuestas; cada respuesta lleva a otro estado.</p>

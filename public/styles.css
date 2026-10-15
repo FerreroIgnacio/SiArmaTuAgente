@@ -73,7 +73,7 @@ button{font:inherit;color:inherit;}
 .brand-sep{color:#c9bfb6;}
 .crumb-sep{color:#c9bfb6;}
 .crumb{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:280px;}
-.saved{font-size:12px;color:var(--muted);}
+.saved{font-size:12px;color:var(--muted);position:relative;top:2px;}
 .top-right{margin-left:auto;display:flex;align-items:center;gap:10px;}
 
 /* Botones */
@@ -374,6 +374,10 @@ input:focus,textarea:focus,select:focus{outline:2px solid rgba(240,125,26,0.35);
 .fnode.accion.con-error{border-color:#d64545;background:#fdeceb;}
 .fnode.accion.con-error .num{background:#d64545;}
 .fnode.accion.con-error small{color:#b42318;}
+.fnode.accion.con-error{border-radius:22px;}
+.fnode.accion.con-error .fhead{height:auto;min-height:56px;padding-top:9px;padding-bottom:9px;}
+.fnode.accion.con-error small{white-space:normal;overflow-wrap:anywhere;}
+.fnode.accion.varios-errores small::before{content:"•";margin-right:5px;}
 .fnode .fsal li.destino{background:rgba(240,125,26,0.14);border-radius:8px;}
 .fnode .fsal li.destino .port{background:#fdede0;border-color:var(--accent);border-style:solid;transform:scale(1.25);}
 .fnode .fsal li.dup{background:#fdecea;color:#a3281a;}

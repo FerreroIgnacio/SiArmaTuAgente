@@ -10,6 +10,7 @@ let bots = [];
 let timerGuardado = null;
 let guardando = Promise.resolve();
 let wa = null; // WhatsApp personal corriendo en esta pestaña (ver whatsapp.js)
+let waEnEspera = null; // el de arriba mientras se eligió Meta sin haber escaneado el QR: sigue vivo por si se vuelve
 let sesionPrueba = nuevaSesion();
 let estadoPrueba = null; // estado donde está la charla de prueba, se resalta en el lienzo
 
@@ -132,6 +133,9 @@ const URL_GUIA_META = '/ayuda/api-meta';
 function refrescarDerivados() {
   const prov = form.querySelector('[name="conexion.proveedor"]:checked')?.value;
   $('#metaFields').hidden = prov !== 'meta';
+  // El QR se oculta o vuelve al tocar el proveedor, sin esperar a que se guarde
+  if (prov !== 'baileys') $('#qrBoxConexion').hidden = true;
+  else if (!wa && waEnEspera) pintarEstado(waEnEspera.estado());
   $('#provHelp').replaceChildren(
     ...(prov === 'meta'
       ? ['Responde desde nuestros servidores, aunque cierres esta página. Cargá los datos, configurá el webhook en Meta y tocá Conectar. ',
@@ -501,29 +505,37 @@ function conectar(origen, salidaId, destino) {
 }
 
 function resumenNodo(n) {
-  if (n.tipo === 'accion') return errorAccion(n.accion) || resumenAccion(n.accion);
+  if (n.tipo === 'accion') return n.accion ? resumenAccion(n.accion) : 'Elegí qué hace';
   if (n.tipo === 'salto') return n.objetivo ? `Va a ${n.objetivo}` : 'Elegí a qué estado va';
   const mensajes = n.mensajes || [];
   if (!mensajes.length) return 'Sin mensajes';
   return resumenMensaje(mensajes[0]) + (mensajes.length > 1 ? ` · +${mensajes.length - 1}` : '');
 }
 
-// Por qué una acción no va a andar ('' si no se sabe de ningún problema)
+// Por qué una acción no va a andar (vacío si no se sabe de ningún problema)
 let googleInfo = null; // lo que devuelve /api/google
-function errorAccion(a) {
-  if (!a) return 'Elegí qué hace';
+let estadoAgente = null; // estado de la conexión a WhatsApp (null: todavía no se sabe)
+function erroresAccion(a) {
+  if (!a) return ['Elegí qué hace'];
+  const e = [], si = (cond, msg) => cond && e.push(msg);
   switch (a.tipo) {
-    case 'mail': return a.para?.trim() ? '' : 'Falta el destinatario';
-    case 'whatsapp': return !a.numero?.trim() ? 'Falta el número' : !a.texto?.trim() ? 'Falta el mensaje' : '';
+    case 'mail':
+      si(!a.para?.trim(), 'Falta el destinatario');
+      break;
+    case 'whatsapp':
+      si(estadoAgente && estadoAgente !== 'conectado', 'El agente está apagado');
+      si(!a.numero?.trim(), 'Falta número de WhatsApp');
+      si(!a.texto?.trim(), 'Falta el mensaje');
+      break;
     case 'sheets':
-      if (googleInfo && !googleInfo.conectado) return 'Google no está conectado';
-      if (googleInfo && !googleInfo.sheets) return 'Faltan permisos de Google';
-      if (!a.planilla) return 'Falta elegir la planilla';
-      if (!(a.columnas || []).some(c => c.columna)) return 'Faltan las columnas';
-      if (a.modo === 'actualizar' && !a.buscarColumna) return 'Falta la columna donde buscar';
-      return '';
-    default: return '';
+      si(googleInfo && !googleInfo.conectado, 'Google no está conectado');
+      si(googleInfo?.conectado && !googleInfo.sheets, 'Faltan permisos de Google');
+      si(!a.planilla, 'Falta elegir la planilla');
+      si(!(a.columnas || []).some(c => c.columna), 'Faltan las columnas');
+      si(a.modo === 'actualizar' && !a.buscarColumna, 'Falta la columna donde buscar');
+      break;
   }
+  return e;
 }
 
 function resumenAccion(a) {
@@ -559,13 +571,15 @@ function renderArbol() {
     const esAccion = n.tipo === 'accion', esSalto = n.tipo === 'salto';
     const salidas = filasDe(n), cero = salidaCero(n);
     const dups = repetidas(n);
-    const div = el('div', { class: `fnode${esAccion ? ' accion' : esSalto ? ' salto' : ''}${n.id === estadoPrueba ? ' actual' : ''}${espera?.nodo === n.id ? ' esperando' : ''}${dups.size || esAccion && errorAccion(n.accion) ? ' con-error' : ''}${rutas.has(n.id) ? '' : ' suelto'}${n.id === seleccionado ? ' sel' : marcados.has(n.id) ? ' marcado' : ''}` },
+    // Una acción que no va a andar muestra sus errores, uno debajo del otro, en lugar del resumen
+    const errores = esAccion ? erroresAccion(n.accion) : [];
+    const div = el('div', { class: `fnode${esAccion ? ' accion' : esSalto ? ' salto' : ''}${n.id === estadoPrueba ? ' actual' : ''}${espera?.nodo === n.id ? ' esperando' : ''}${dups.size || errores.length ? ' con-error' : ''}${errores.length > 1 ? ' varios-errores' : ''}${rutas.has(n.id) ? '' : ' suelto'}${n.id === seleccionado ? ' sel' : marcados.has(n.id) ? ' marcado' : ''}` },
       el('div', { class: 'fhead' },
         esRaiz ? el('span', { class: 'num raiz', title: 'Primer mensaje', innerHTML: ICONO_CHAT }) : el('span', { class: 'port in', title: 'Soltá acá una salida para conectar' }),
         esAccion ? el('span', { class: 'num' }, '⚙') : esSalto ? el('span', { class: 'num' }, '↪') : null,
         el('span', { class: 'txt' },
           el('b', { class: !esRaiz && !n.nombre ? 'vacio' : '' }, nombreDe(n), n.guardarEn ? ` → {${n.guardarEn}}` : ''),
-          el('small', {}, resumenNodo(n))),
+          ...(errores.length ? errores.map(t => el('small', {}, t)) : [el('small', {}, resumenNodo(n))])),
         n.timed ? el('span', { class: `reinicio${animTapa(n.id)}`, title: nodo(cero?.destino) ? `Pasa solo a ${nombreDe(nodo(cero.destino))} a los ${esperaDe(n)} s` : `Tras ${esperaDe(n)} s la charla se reinicia` }, `⏱ ${esperaDe(n)} s`)
           : terminal(n) ? null : el('span', { class: 'reinicio apagado', title: autoFin(n) ? `Tras ${esperaDe(n)} s la charla se reinicia` : 'No es por tiempo' }, `⏱ ${esperaDe(n)} s`),
         esAccion ? el('span', { class: `port out cero${nodo(cero?.destino) ? '' : ' apagado'}`, 'data-salida': cero?.id || CERO, title: 'Después de la acción sigue acá: arrastrá hasta otra acción o estado' })
@@ -1456,13 +1470,13 @@ function cargarFlujo(f) {
 /* ---------- Secciones ---------- */
 function mostrarSeccion(sec) {
   const s = $(`.sec[data-sec="${sec}"]`);
-  if (!s || $(`.sections button[data-sec="${sec}"]`)?.disabled) sec = 'respuestas';
+  if (!s || $(`.sections button[data-sec="${sec}"]`)?.disabled) sec = 'comportamiento';
   $$('.sec').forEach(s => (s.hidden = s.dataset.sec !== sec));
   $$('.sections button').forEach(b => b.setAttribute('aria-current', String(b.dataset.sec === sec)));
   if (location.hash.slice(1) !== sec) history.replaceState(null, '', `#${sec}`);
   if (sec === 'metricas') cargarMetricas();
   if (sec === 'planillas') pintarPlanillas();
-  if (sec === 'respuestas') { if (ajustarAlMostrar) ajustar(); dibujarConectores(); }
+  if (sec === 'comportamiento') { if (ajustarAlMostrar) ajustar(); dibujarConectores(); }
 }
 $$('.sections button').forEach(b => (b.onclick = () => mostrarSeccion(b.dataset.sec)));
 
@@ -1488,7 +1502,8 @@ async function abrirBot(id) {
   mostrarSeccion($('.sections button[aria-current="true"]')?.dataset.sec);
   llenarForm(bot);
   wa?.cerrar();
-  wa = null;
+  waEnEspera?.cerrar();
+  wa = waEnEspera = null;
   pintarEstado({ estado: 'desconectado', proveedor: bot.conexion?.proveedor, ...(bot.conexion?.proveedor === 'baileys' ? {} : bot.estado) });
   // Con WhatsApp personal se conecta solo: retoma la sesión recordada o muestra el QR
   if (prepararWhatsApp(bot.conexion?.proveedor)) wa.conectar();
@@ -1504,13 +1519,16 @@ async function crearAgente() {
   const bot = await api('POST', '/api/bots', {});
   bots.push({ id: bot.id, nombre: bot.agente.nombre, estado: 'desconectado' });
   await abrirBot(bot.id);
-  mostrarSeccion('respuestas');
+  mostrarSeccion('comportamiento');
 }
 
 /* ---------- Conexión ---------- */
 const ETIQUETAS = { desconectado: 'Desconectado', conectando: 'Desconectado', esperando_qr: 'Desconectado', conectado: 'Conectado', error: 'Error' };
 
 function pintarEstado(s) {
+  // Las acciones de WhatsApp no salen con el agente apagado: se marcan en rojo
+  if ((s.estado === 'conectado') !== (estadoAgente === 'conectado') || !estadoAgente) { estadoAgente = s.estado; renderArbol(); }
+  estadoAgente = s.estado;
   for (const pill of [$('#pill'), $('#pill2')]) {
     pill.dataset.estado = ['conectando', 'esperando_qr'].includes(s.estado) ? 'desconectado' : s.estado;
     pill.textContent = ETIQUETAS[s.estado] || s.estado;
@@ -1525,6 +1543,7 @@ function pintarEstado(s) {
   const baileys = s.proveedor === 'baileys';
   $('#btnConectar').hidden = activo;
   $('#btnDesconectar').hidden = !activo;
+  $('#btnConectarMeta').hidden = activo || s.proveedor !== 'meta';
   // Con sesión recordada solo se ofrece desvincular; sin sesión se muestra el QR
   $('#btnLogout').hidden = !(baileys && (s.estado === 'conectado' || s.estado === 'error'));
   const b = bots.find(b => b.id === botId);
@@ -1673,10 +1692,18 @@ function agregarLog(m) {
 
 // WhatsApp personal corre en esta pestaña; el resto de los proveedores, en el servidor
 function prepararWhatsApp(proveedor) {
-  if (proveedor !== 'baileys') { wa?.desconectar(); wa = null; return null; }
-  wa ??= crearWhatsApp({
+  if (proveedor !== 'baileys') {
+    // Conectado se corta para no responder por los dos lados; esperando el QR queda vivo
+    if (wa?.estado().estado === 'conectado') wa.desconectar(); else if (wa) waEnEspera = wa;
+    wa = null;
+    return null;
+  }
+  if (!wa && waEnEspera) { wa = waEnEspera; waEnEspera = null; pintarEstado(wa.estado()); }
+  if (wa) return wa;
+  const nuevo = wa = crearWhatsApp({
     botId, api,
-    alEstado: pintarEstado,
+    // En espera no pinta; si justo escanean el QR con Meta elegido, se corta (la sesión queda guardada)
+    alEstado: s => { if (nuevo === wa) pintarEstado(s); else if (nuevo === waEnEspera && s.estado === 'conectado') nuevo.desconectar(); },
     alMensaje: agregarLog,
     alFoto: ponerFoto,
     alMetricas: () => { if (!$('.sec[data-sec="metricas"]').hidden) cargarMetricas(); },
@@ -1720,7 +1747,7 @@ function escucharEventos(proveedor) {
 async function accion(boton, fn) {
   boton.disabled = true;
   try { await fn(); }
-  catch (err) { $('#statusDetail').textContent = err.message; mostrarSeccion('comportamiento'); }
+  catch (err) { $('#statusDetail').textContent = err.message; mostrarSeccion('general'); }
   finally { boton.disabled = false; }
 }
 
@@ -1734,9 +1761,13 @@ function irAConexion() {
 }
 $('#btnConectar').onclick = e => accion(e.currentTarget, async () => {
   await guardarPendiente();
-  mostrarSeccion('comportamiento');
+  mostrarSeccion('general');
   irAConexion();
   if (wa) return wa.conectar();
+  pintarEstado(await api('POST', `/api/bots/${botId}/conectar`));
+});
+$('#btnConectarMeta').onclick = e => accion(e.currentTarget, async () => {
+  await guardarPendiente();
   pintarEstado(await api('POST', `/api/bots/${botId}/conectar`));
 });
 $('#btnDesconectar').onclick = e => accion(e.currentTarget, async () => wa ? wa.desconectar() : pintarEstado(await api('POST', `/api/bots/${botId}/desconectar`)));
@@ -1867,7 +1898,7 @@ function formatoWhatsApp(texto) {
 
 function etiquetaFuente(res) {
   if (res.fuente === 'opcion' && nodo(res.respuestaId)) {
-    const ir = el('button', { type: 'button', onclick: () => { mostrarSeccion('respuestas'); seleccionar(res.respuestaId); } }, rutaDe(res.respuestaId));
+    const ir = el('button', { type: 'button', onclick: () => { mostrarSeccion('comportamiento'); seleccionar(res.respuestaId); } }, rutaDe(res.respuestaId));
     return [`${FUENTES.opcion}: `, ir];
   }
   return [FUENTES[res.fuente] || res.fuente];
