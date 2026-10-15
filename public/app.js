@@ -386,9 +386,22 @@ function caja(n) {
   return { top: n.pos.y, bottom: n.pos.y + h, left: n.pos.x, right: n.pos.x + NODO_W };
 }
 const directo = ({ x: x1, y: y1 }, { x: x2, y: y2 }) => x2 - x1 >= 2 * STUB;
-function recto({ x: x1, y: y1 }, { x: x2, y: y2 }) {
-  const mx = (x1 + x2) / 2;
-  return [[x1, y1], [mx, y1], [mx, y2], [x2, y2]];
+// La vertical busca el medio, pero se corre a izquierda o derecha si ahí ya hay otra línea encimada
+const PASO_VERT = 10;
+function recto({ x: x1, y: y1 }, { x: x2, y: y2 }, troncos, segs) {
+  const mid = (x1 + x2) / 2, lo = x1 + STUB, hi = x2 - STUB;
+  const xs = new Set([mid]);
+  for (let k = 1; mid - k * PASO_VERT >= lo || mid + k * PASO_VERT <= hi; k++)
+    for (const x of [mid - k * PASO_VERT, mid + k * PASO_VERT]) if (x >= lo && x <= hi) xs.add(x);
+  let mejor, puntaje = Infinity;
+  for (const mx of xs) {
+    const pts = [[x1, y1], [mx, y1], [mx, y2], [x2, y2]];
+    const encima = tramos(pts).filter(([a, b]) => a[0] === b[0]).reduce((t, [a, b]) => t + segs.filter(([c, d]) =>
+      c[0] === d[0] && c[0] === a[0] && Math.min(a[1], b[1]) < Math.max(c[1], d[1]) && Math.max(a[1], b[1]) > Math.min(c[1], d[1])).length, 0);
+    const p = cruces(pts, segs) + 500 * encima + Math.abs(mx - mid);
+    if (p < puntaje) { puntaje = p; mejor = pts; }
+  }
+  return mejor;
 }
 // `troncos`: x de las verticales con las que ya entran otras líneas al mismo destino (sumarse a ellas no cruza nada)
 function rodeo({ x: x1, y: y1 }, { x: x2, y: y2 }, ca, cb, troncos, segs, cajas) {
@@ -477,7 +490,7 @@ function dibujarConectores() {
   }));
   const segs = [], troncos = new Map();
   for (const c of conexiones) if (directo(c.a, c.b)) {
-    c.pts = recto(c.a, c.b);
+    c.pts = recto(c.a, c.b, troncos.get(c.h.id) || [], segs);
     segs.push(...tramos(c.pts));
     troncos.set(c.h.id, [...troncos.get(c.h.id) || [], c.pts[1][0]]);
   }
