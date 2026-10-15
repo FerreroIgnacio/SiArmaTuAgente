@@ -145,6 +145,14 @@ export async function listarPlanillas(sub) {
   return files.map(f => ({ id: f.id, nombre: f.name, url: f.webViewLink, modificada: f.modifiedTime }));
 }
 
+// Si el dueño no tiene ninguna planilla (o no dio el permiso), se le crea una por defecto. No frena el login si falla
+export async function asegurarPlanilla(sub) {
+  try {
+    if (!(await estadoGoogle(sub)).sheets) return;
+    if (!(await listarPlanillas(sub)).length) await crearPlanilla(sub, { titulo: 'Registros del agente' });
+  } catch (err) { console.error('Planilla por defecto:', err.message); }
+}
+
 export async function hojasDe(sub, planilla) {
   const { sheets = [] } = await api(sub, 'GET', `${base(idPlanilla(planilla))}?fields=sheets.properties.title`);
   return sheets.map(s => s.properties.title);

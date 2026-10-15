@@ -4,3 +4,5 @@ data/
 public/wa-worker.js
 .dev.vars
 .wrangler/
+.claude/
+CLAUDE.md

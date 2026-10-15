@@ -378,27 +378,53 @@ function ajustar() {
 }
 
 // Conector ortogonal con esquinas redondeadas, de un punto de salida a un punto de entrada.
-// Si el destino no está a la derecha, sale, rodea por un carril horizontal libre entre (o fuera de) las cajas y entra por la izquierda.
+// Si el destino no está a la derecha, sale, rodea por un carril horizontal (entre, arriba o abajo de las cajas) y entra por la izquierda;
+// de los recorridos posibles se queda con el que menos se cruza con las otras líneas y no pasa por encima de otros nodos.
 const STUB = 20, RADIO = 10;
 function caja(n) {
   const h = $(`.fnode[data-id="${n.id}"]`)?.offsetHeight || CAB_H + filasDe(n).length * SAL_H;
   return { top: n.pos.y, bottom: n.pos.y + h, left: n.pos.x, right: n.pos.x + NODO_W };
 }
-function conector({ x: x1, y: y1 }, { x: x2, y: y2 }, ca, cb) {
-  if (x2 - x1 >= 2 * STUB) {
-    const mx = (x1 + x2) / 2;
-    return redondear([[x1, y1], [mx, y1], [mx, y2], [x2, y2]]);
-  }
-  let ly;
-  if (ca.bottom + 2 * STUB <= cb.top) ly = (ca.bottom + cb.top) / 2;
-  else if (cb.bottom + 2 * STUB <= ca.top) ly = (cb.bottom + ca.top) / 2;
-  else {
-    const abajo = Math.max(ca.bottom, cb.bottom) + STUB, arriba = Math.min(ca.top, cb.top) - STUB;
-    ly = Math.abs(abajo - y1) + Math.abs(abajo - y2) <= Math.abs(arriba - y1) + Math.abs(arriba - y2) ? abajo : arriba;
-  }
-  const xa = Math.max(x1, ca.right) + STUB, xb = Math.min(x2, cb.left) - STUB;
-  return redondear([[x1, y1], [xa, y1], [xa, ly], [xb, ly], [xb, y2], [x2, y2]]);
+const directo = ({ x: x1, y: y1 }, { x: x2, y: y2 }) => x2 - x1 >= 2 * STUB;
+function recto({ x: x1, y: y1 }, { x: x2, y: y2 }) {
+  const mx = (x1 + x2) / 2;
+  return [[x1, y1], [mx, y1], [mx, y2], [x2, y2]];
 }
+// `troncos`: x de las verticales con las que ya entran otras líneas al mismo destino (sumarse a ellas no cruza nada)
+function rodeo({ x: x1, y: y1 }, { x: x2, y: y2 }, ca, cb, troncos, segs, cajas) {
+  const lys = [Math.max(ca.bottom, cb.bottom) + STUB, Math.min(ca.top, cb.top) - STUB];
+  if (ca.bottom + 2 * STUB <= cb.top) lys.push((ca.bottom + cb.top) / 2);
+  if (cb.bottom + 2 * STUB <= ca.top) lys.push((cb.bottom + ca.top) / 2);
+  const xa = Math.max(x1, ca.right) + STUB, xb0 = Math.min(x2, cb.left) - STUB;
+  const xbs = [xb0, ...troncos.filter(x => x < xb0)];
+  let mejor, puntaje = Infinity;
+  for (const ly of lys) for (const xb of xbs) {
+    const pts = [[x1, y1], [xa, y1], [xa, ly], [xb, ly], [xb, y2], [x2, y2]];
+    const p = cruces(pts, segs) + 3000 * pisadas(pts, cajas.filter(c => c !== ca && c !== cb)) + largo(pts);
+    if (p < puntaje) { puntaje = p; mejor = pts; }
+  }
+  return mejor;
+}
+const tramos = pts => pts.slice(1).map((p, i) => [pts[i], p]).filter(([a, b]) => a[0] !== b[0] || a[1] !== b[1]);
+const largo = pts => tramos(pts).reduce((t, [a, b]) => t + Math.abs(b[0] - a[0]) + Math.abs(b[1] - a[1]), 0);
+const entre = (v, a, b) => Math.min(a, b) < v && v < Math.max(a, b);
+const dentro = (v, a, b) => Math.min(a, b) <= v && v <= Math.max(a, b);
+// Cruce de lleno: 1000; una línea que termina sobre otra (parece cruzarla): 400
+function cruces(pts, segs) {
+  let t = 0;
+  for (const [a, b] of tramos(pts)) for (const [c, d] of segs) {
+    const [v1, v2, h1, h2] = a[0] === b[0] ? [a, b, c, d] : [c, d, a, b];
+    if (v1[0] !== v2[0] || h1[1] !== h2[1]) continue;
+    const x = v1[0], y = h1[1];
+    if (!dentro(x, h1[0], h2[0]) || !dentro(y, v1[1], v2[1])) continue;
+    const enH = entre(x, h1[0], h2[0]), enV = entre(y, v1[1], v2[1]);
+    t += enH && enV ? 1000 : enH || enV ? 400 : 0;
+  }
+  return t;
+}
+const pisadas = (pts, cajas) => tramos(pts).reduce((t, [a, b]) => t + cajas.filter(c =>
+  a[0] === b[0] ? entre(a[0], c.left, c.right) && Math.min(a[1], b[1]) < c.bottom && Math.max(a[1], b[1]) > c.top
+    : entre(a[1], c.top, c.bottom) && Math.min(a[0], b[0]) < c.right && Math.max(a[0], b[0]) > c.left).length, 0);
 function redondear(pts) {
   pts = pts.filter((p, i) => !i || p[0] !== pts[i - 1][0] || p[1] !== pts[i - 1][1]);
   let d = `M${pts[0][0]} ${pts[0][1]}`;
@@ -443,13 +469,28 @@ const puntoEntrada = n => puntoDe(n, '.port.in', { x: n.pos.x, y: n.pos.y + CAB_
 
 // Cada conexión: la línea visible + una más gruesa e invisible para poder hacerle clic
 function dibujarConectores() {
+  // Primero las que van derecho a la derecha; después las que rodean, eligiendo por dónde según las ya trazadas
+  const cajas = new Map(nodos.map(n => [n.id, caja(n)]));
+  const conexiones = nodos.flatMap(n => (n.salidas || []).filter(s => nodo(s.destino)).map(s => {
+    const h = nodo(s.destino);
+    return { n, s, h, a: puntoSalida(n, s), b: puntoEntrada(h) };
+  }));
+  const segs = [], troncos = new Map();
+  for (const c of conexiones) if (directo(c.a, c.b)) {
+    c.pts = recto(c.a, c.b);
+    segs.push(...tramos(c.pts));
+    troncos.set(c.h.id, [...troncos.get(c.h.id) || [], c.pts[1][0]]);
+  }
+  for (const c of conexiones) if (!c.pts) {
+    c.pts = rodeo(c.a, c.b, cajas.get(c.n.id), cajas.get(c.h.id), troncos.get(c.h.id) || [], segs, [...cajas.values()]);
+    segs.push(...tramos(c.pts));
+    troncos.set(c.h.id, [...troncos.get(c.h.id) || [], c.pts[3][0]]);
+  }
   const lineas = [];
   for (const n of nodos) {
     const dups = repetidas(n);
-    for (const s of n.salidas || []) {
-      const h = nodo(s.destino);
-      if (!h) continue;
-      const d = conector(puntoSalida(n, s), puntoEntrada(h), caja(n), caja(h));
+    for (const c of conexiones.filter(c => c.n === n)) {
+      const { s, h } = c, d = redondear(c.pts);
       const g = svg('g', { 'data-padre': n.id, 'data-salida': s.id });
       const on = seleccionado && (n.id === seleccionado || h.id === seleccionado);
       // Nodo por tiempo: la primera salida es la que sigue (más viva), las demás quedan apagadas
@@ -2034,21 +2075,13 @@ async function pintarGoogle(error = '') {
   // En Planillas: si falta conectar Google (o sus permisos) se conecta desde ahí mismo
   $('#planillasGoogle').hidden = g.conectado && g.sheets;
   $('#planillasGoogle').closest('.card').classList.toggle('sin-google', !(g.conectado && g.sheets));
-  $('#planillasGoogleTexto').textContent = faltan ? 'A tu cuenta de Google le faltan permisos para las planillas.' : 'Conectá tu cuenta de Google para crear y usar planillas.';
+  $('#planillasGoogleTexto').textContent = error || (faltan ? 'A tu cuenta de Google le faltan permisos para las planillas.' : 'Conectá tu cuenta de Google para crear y usar planillas.');
   $('#planillasConectar').textContent = faltan ? 'Volver a conectar' : 'Conectar Google';
-  $('#googleEstado').textContent = error || (g.conectado
-    ? `Conectada como ${g.email}${faltan ? '. Faltan permisos: volvé a conectarla.' : '. Las planillas de las acciones se crean en su Drive.'}`
-    : 'Conectala para que las acciones puedan escribir en planillas de Google Sheets.');
-  $('#googleEstado').classList.toggle('mal', !!error || faltan);
-  $('#googleConectar').textContent = g.conectado ? 'Volver a conectar' : 'Conectar Google';
-  $('#googleDesconectar').hidden = !g.conectado;
   // Al conectar o desconectar Google cambian las planillas disponibles
   planillasCache = null;
   planillasError = '';
 }
-$('#googleConectar').onclick = async () => { await guardarPendiente(); location.href = '/auth/google/conectar'; };
 $('#planillasConectar').onclick = async () => { await guardarPendiente(); location.href = '/auth/google/conectar?volver=planillas'; };
-$('#googleDesconectar').onclick = async () => { await api('POST', '/api/google/desconectar'); pintarGoogle(); };
 
 async function iniciar() {
   const yo = await api('GET', '/api/yo');
