@@ -14,14 +14,28 @@ const normalizar = s => ` ${String(s || '').toLowerCase().normalize('NFD').repla
 
 function estadoChat(clave) {
   const c = chats.get(clave);
-  if (c && Date.now() - c.ultimo < EXPIRA_MS) return c;
+  if (c && Date.now() - c.ultimo < EXPIRA_MS && !(c.reinicia && Date.now() >= c.reinicia)) return c;
   const nuevo = { historial: [], menus: ['inicio'], vars: {}, ultimo: 0 };
   chats.set(clave, nuevo);
   return nuevo;
 }
 
 // Respuestas del estado que llevan a algún lado (las que se pueden elegir)
-const salidasDe = (nodo, nodos) => (nodo.salidas || []).filter(s => nodos.has(s.destino));
+// Un estado temporizado no escucha: no tiene respuestas para elegir
+const salidasDe = (nodo, nodos) => nodo.timed ? [] : (nodo.salidas || []).filter(s => !s.tiempo && (s.texto?.trim() || s.cualquiera) && nodos.has(s.destino));
+// Estado que no escucha (todas sus salidas desconectadas o sin texto): pasa solo al siguiente tras `espera` segundos.
+// Si no tiene ninguna salida conectada (estado final), tras la espera la charla se reinicia (destino null).
+const autoDe = (nodo, nodos) => {
+  if (!nodo || nodo.tipo === 'accion' || nodo.tipo === 'salto' || salidasDe(nodo, nodos).length) return null;
+  // Temporizado: tras la espera pasa por la salida por tiempo (o la primera, en estados viejos), sin importar lo que escuche
+  if (nodo.timed) {
+    const d = ((nodo.salidas || []).find(x => x.tiempo) || nodo.salidas?.[0])?.destino;
+    return { destino: nodos.has(d) ? d : null, espera: Math.max(0, Number(nodo.espera ?? 5) || 0) };
+  }
+  const s = (nodo.salidas || []).find(x => !x.tiempo && nodos.has(x.destino));
+  if (!s && (nodo.id === 'inicio' || nodo.guardarEn)) return null;
+  return { destino: s?.destino || null, espera: Math.max(0, Number(nodo.espera ?? 5) || 0) };
+};
 // Las que se le muestran al cliente como opciones (con texto, y si el estado las muestra)
 const opcionesDe = (nodo, nodos) => nodo.formatoOpciones === 'ninguno' ? [] : salidasDe(nodo, nodos).filter(s => s.texto);
 
@@ -75,8 +89,9 @@ function elegir(nodo, texto, nodos, { numeros = true } = {}) {
 const estadoLlamado = (nodos, nombre) => {
   const n = normalizar(nombre);
   if (!n.trim()) return null;
-  for (const x of nodos.values()) if (x.tipo !== 'salto' && normalizar(x.id === 'inicio' ? x.nombre || 'Inicio' : x.nombre) === n) return x;
-  return n === ' inicio ' ? nodos.get('inicio') : null;
+  const iguales = [...nodos.values()].filter(x => x.tipo !== 'salto' && normalizar(x.id === 'inicio' ? x.nombre || 'Inicio' : x.nombre) === n);
+  if (iguales.length > 1) { console.warn(`Salto a "${nombre}": hay ${iguales.length} estados con ese nombre, no se salta`); return null; }
+  return iguales[0] || (n === ' inicio ' ? nodos.get('inicio') : null);
 };
 
 // Mensajes de un estado → mensajes que entiende cualquier proveedor, con las {variables} reemplazadas
@@ -128,8 +143,9 @@ const resumen = m => m.tipo === 'texto' ? m.texto : m.tipo === 'encuesta' ? `${m
 // Devuelve { mensajes: [...], acciones, vars, fuente, respuestaId }
 //   fuente: 'inicio' | 'opcion' | 'llm' | 'sin_coincidencia'
 //   cliente: { nombre, telefono } para las variables {nombre} y {telefono}
-export async function responder(bot, chatId, texto, cliente = {}) {
+export async function responder(bot, chatId, texto, cliente = {}, { avanzar = null } = {}) {
   const chat = estadoChat(`${bot.id}:${chatId}`);
+  chat.reinicia = 0;
   const nodos = porId(bot.flujo);
   const raiz = nodos.get('inicio');
   // Pila de menús: se descartan los nodos que ya no existen
@@ -140,7 +156,11 @@ export async function responder(bot, chatId, texto, cliente = {}) {
   const t = normalizar(texto);
 
   let destino = null, fuente = null, nivel = menus.length;
-  if (primerMensaje) {
+  if (avanzar) {
+    // Continuación automática: el estado anterior no escucha, así que se pasa directo al siguiente
+    destino = nodos.get(avanzar);
+    if (!destino) return { mensajes: [], acciones: [], vars: chat.vars, fuente: 'inicio', respuestaId: null, nodoActual: chat.menus.at(-1), auto: null };
+  } else if (primerMensaje) {
     // Si el primer mensaje ya pide una opción de primer nivel, va directo (después del saludo)
     destino = elegir(raiz, texto, nodos, { numeros: false }) || raiz;
     nivel = 1;
@@ -203,17 +223,16 @@ export async function responder(bot, chatId, texto, cliente = {}) {
     }
   }
 
-  chat.historial.push({ role: 'user', content: texto });
+  if (!avanzar) chat.historial.push({ role: 'user', content: texto });
   if (mensajes.length) chat.historial.push({ role: 'assistant', content: mensajes.map(resumen).join('\n') });
   while (chat.historial.length > MAX_HISTORIAL) chat.historial.splice(0, 2);
   chat.ultimo = Date.now();
 
-  // Estado terminal (sin respuestas ni pregunta): la charla termina y el próximo mensaje arranca de cero
-  if (destino && destino !== raiz && destino.tipo !== 'accion' && !destino.guardarEn && !salidasDe(destino, nodos).length) {
-    chats.delete(`${bot.id}:${chatId}`);
-  }
+  // Estado final (sin salidas conectadas ni pregunta): pasada la espera, el próximo mensaje arranca de cero
+  const auto = autoDe(destino, nodos);
+  if (auto && !auto.destino) chat.reinicia = chat.ultimo + auto.espera * 1000;
 
-  return { mensajes, acciones, vars, fuente, respuestaId: destino?.id || null, nodoActual: chat.menus.at(-1) };
+  return { mensajes, acciones, vars, fuente, respuestaId: destino?.id || null, nodoActual: chat.menus.at(-1), auto };
 }
 
 export { resumen as resumenMensaje };

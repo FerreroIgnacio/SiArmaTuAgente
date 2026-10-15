@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { ARCHIVOS_DIR, borrarBot, botPublico, getBot, listBots, saveBot } from './store.js';
+import { ARCHIVOS_DIR, botPublico, getBot, listBots, saveBot } from './store.js';
 import { botActualizado, conectar, desconectar, estado, providerDe, suscribir } from './runtime.js';
 import { responder, olvidarChat } from './engine.js';
 import { proveedoresDisponibles } from './providers/index.js';
@@ -76,13 +76,6 @@ app.put('/api/bots/:id', conBot(async (bot, req, res) => {
   res.json(botPublico(nuevo));
 }));
 
-// Borrar un agente: se desvincula de WhatsApp y se eliminan todos sus datos
-app.delete('/api/bots/:id', conBot(async (bot, req, res) => {
-  await desconectar(bot.id, { cerrarSesion: true }).catch(() => {});
-  await borrarBot(bot.id);
-  res.json({ ok: true });
-}));
-
 app.post('/api/bots/:id/conectar', conBot(async (bot, req, res) => res.json(await conectar(bot.id))));
 app.post('/api/bots/:id/desconectar', conBot(async (bot, req, res) =>
   res.json(await desconectar(bot.id, { cerrarSesion: !!req.body?.cerrarSesion }))));
@@ -91,10 +84,11 @@ app.post('/api/bots/:id/desconectar', conBot(async (bot, req, res) =>
 app.post('/api/bots/:id/probar', conBot(async (bot, req, res) => {
   const chatId = `prueba:${req.body?.sesion || 'web'}`;
   if (req.body?.reiniciar) { olvidarChat(bot.id, chatId); return res.json({ ok: true }); }
+  const avanzar = req.body?.avanzar || null;
   const texto = String(req.body?.texto || '').trim();
-  if (!texto) return res.status(400).json({ error: 'Mensaje vacío' });
+  if (!texto && !avanzar) return res.status(400).json({ error: 'Mensaje vacío' });
   // En la vista previa las acciones se ejecutan de verdad, con el usuario logueado como cliente
-  const { vars, ...res2 } = await responder(bot, chatId, texto, { nombre: req.usuario.nombre || 'Cliente de prueba', telefono: '5491100000000' });
+  const { vars, ...res2 } = await responder(bot, chatId, texto, { nombre: req.usuario.nombre || 'Cliente de prueba', telefono: '5491100000000' }, { avanzar });
   const acciones = [];
   for (const a of res2.acciones) {
     try { acciones.push({ ok: true, detalle: await ejecutar(bot, a, vars, { enviarWhatsApp: enviarWhatsAppDe(bot) }) }); }

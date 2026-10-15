@@ -48,30 +48,34 @@ export async function conectar(botId) {
   });
 
   provider.on('message', async ({ chatId, from, nombre, texto }) => {
-    const t0 = Date.now();
-    publicar(botId, 'mensaje', { chatId, nombre, texto, de: 'cliente', ts: t0 });
-    try {
-      const actual = (await getBot(botId)) || bot;
-      const { mensajes, acciones, vars, fuente, respuestaId } = await responder(actual, chatId, texto, { nombre, telefono: from || chatId });
-      for (const m of mensajes) {
-        // Pausa "escribiendo…" de 2 a 6 s antes de cada mensaje, para no responder como un bot instantáneo
-        await provider.typing(chatId);
-        await new Promise(r => setTimeout(r, 2000 + Math.random() * 4000));
-        await provider.send(chatId, m);
-        publicar(botId, 'mensaje', { chatId, nombre, texto: resumenMensaje(m), de: 'bot', fuente, ts: Date.now() });
+    const turno = async (texto, avanzar = null) => {
+      const t0 = Date.now();
+      if (!avanzar) publicar(botId, 'mensaje', { chatId, nombre, texto, de: 'cliente', ts: t0 });
+      try {
+        const actual = (await getBot(botId)) || bot;
+        const { mensajes, acciones, vars, fuente, respuestaId, auto } = await responder(actual, chatId, texto, { nombre, telefono: from || chatId }, { avanzar });
+        for (const m of mensajes) {
+          // Pausa "escribiendo…" de 2 a 6 s antes de cada mensaje, para no responder como un bot instantáneo
+          await provider.typing(chatId);
+          await new Promise(r => setTimeout(r, 2000 + Math.random() * 4000));
+          await provider.send(chatId, m);
+          publicar(botId, 'mensaje', { chatId, nombre, texto: resumenMensaje(m), de: 'bot', fuente, ts: Date.now() });
+        }
+        await registrar(botId, { chatId, fuente, respuestaId, enviados: mensajes.length, ms: Date.now() - t0 });
+        // Las acciones van después de responder: un error en una no frena la charla ni las demás
+        for (const a of acciones) {
+          let resultado;
+          try { resultado = `⚙ ${await ejecutar(actual, a, vars, { enviarWhatsApp: (jid, t) => provider.send(jid, { tipo: 'texto', texto: t }) })}`; }
+          catch (err) { resultado = `⚠ Acción fallida: ${err.message}`; console.error(`[${botId}] acción`, err.message); }
+          publicar(botId, 'mensaje', { chatId, nombre, texto: resultado, de: 'bot', fuente: 'accion', ts: Date.now() });
+        }
+        publicar(botId, 'metricas', {});
+        if (auto?.destino) setTimeout(() => turno(null, auto.destino), auto.espera * 1000);
+      } catch (err) {
+        console.error(`[${botId}]`, err.message);
       }
-      await registrar(botId, { chatId, fuente, respuestaId, enviados: mensajes.length, ms: Date.now() - t0 });
-      // Las acciones van después de responder: un error en una no frena la charla ni las demás
-      for (const a of acciones) {
-        let resultado;
-        try { resultado = `⚙ ${await ejecutar(actual, a, vars, { enviarWhatsApp: (jid, t) => provider.send(jid, { tipo: 'texto', texto: t }) })}`; }
-        catch (err) { resultado = `⚠ Acción fallida: ${err.message}`; console.error(`[${botId}] acción`, err.message); }
-        publicar(botId, 'mensaje', { chatId, nombre, texto: resultado, de: 'bot', fuente: 'accion', ts: Date.now() });
-      }
-      publicar(botId, 'metricas', {});
-    } catch (err) {
-      console.error(`[${botId}]`, err.message);
-    }
+    };
+    await turno(texto);
   });
 
   await provider.start();

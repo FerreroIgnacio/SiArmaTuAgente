@@ -151,11 +151,14 @@ let nodos = [];
 let seleccionado = null;
 const marcados = new Set(); // estados sumados a la selección con shift+clic, para moverlos juntos
 const enSeleccion = id => id === seleccionado || marcados.has(id);
+let ultimo = null; // último estado clickeado de la selección: ahí van el tachito y el +
+const seleccionados = () => nodos.filter(n => enSeleccion(n.id));
+const barraEn = () => (ultimo && enSeleccion(ultimo) ? ultimo : seleccionado);
 
 const nodo = id => nodos.find(n => n.id === id);
-const destinosDe = n => [...new Set((n.salidas || []).map(s => nodo(s.destino)).filter(Boolean))];
+const destinosDe = n => [...new Set((n.salidas || []).filter(s => !s.tiempo || n.timed).map(s => nodo(s.destino)).filter(Boolean))];
 const padresDe = n => nodos.filter(p => p.salidas?.some(s => s.destino === n.id));
-const nombreDe = n => n.id === 'inicio' ? 'Inicio' : n.nombre || 'Sin nombre';
+const nombreDe = n => n.id === 'inicio' ? 'Primer mensaje' : n.nombre || 'Sin nombre';
 
 // Camino más corto desde el inicio a cada estado alcanzable: Map id → [inicio, ..., nodo]
 function caminos() {
@@ -178,7 +181,8 @@ function caminos() {
 // Igual que en el motor: sin mayúsculas, tildes ni signos
 const normalizar = t => String(t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9ñ]+/g, ' ').trim();
 
-// Respuestas de un estado que escuchan lo mismo que otra (por texto o por sus otras formas): Map id → frase repetida
+// Respuestas de un estado que escuchan lo mismo que una anterior (por texto o por sus otras formas): Map id → frase repetida.
+// La primera que escucha cada frase queda viva; las demás se apagan
 function repetidas(n) {
   const duenos = new Map();
   for (const s of n.salidas || []) {
@@ -187,7 +191,7 @@ function repetidas(n) {
     }
   }
   const out = new Map();
-  for (const [frase, ids] of duenos) if (ids.length > 1) ids.forEach(id => out.has(id) || out.set(id, frase));
+  for (const [frase, ids] of duenos) if (ids.length > 1) ids.slice(1).forEach(id => out.has(id) || out.set(id, frase));
   return out;
 }
 
@@ -273,7 +277,19 @@ const vista = { x: 40, y: 40, z: 1 };
 let ajustarAlMostrar = true;
 const snap = v => Math.round(v / GRID) * GRID;
 const terminal = n => n.tipo === 'accion' || n.tipo === 'salto';
-const filasDe = n => (terminal(n) ? [] : n.salidas) || [];
+// Un estado cuyas salidas están todas desconectadas o sin texto no escucha: pasa solo por la que está conectada
+const escucha = s => !!(s.texto?.trim() || s.cualquiera);
+// Sin tiempo y sin respuestas que escuchen, pasa solo por la primera conectada (estados viejos)
+const pasaSola = n => (n.salidas || []).some(s => escucha(s) && nodo(s.destino)) ? null : (n.salidas || []).find(s => !s.tiempo && nodo(s.destino)) || null;
+// Salida por tiempo (output cero): sale siempre del puerto del encabezado; solo se usa si el estado es por tiempo
+const CERO = '__cero';
+const salidaCero = n => terminal(n) ? null : (n.salidas || []).find(s => s.tiempo) || null;
+// Estado final (ninguna salida conectada): tras la espera la charla se reinicia
+const autoFin = n => !terminal(n) && n.id !== 'inicio' && !n.guardarEn && !(n.salidas || []).some(s => (!s.tiempo || n.timed) && nodo(s.destino));
+const esperaDe = n => Math.max(0, Number(n.espera ?? 5) || 0);
+let espera = null; // { nodo, hasta, ms, destino, timer } mientras la charla de prueba espera para pasar sola
+// La salida de un estado que no escucha sale del puerto de la cabecera, no ocupa una fila
+const filasDe = n => terminal(n) ? [] : (n.salidas || []).filter(s => !s.tiempo);
 const altoNodo = n => CAB_H + filasDe(n).length * SAL_H;
 
 // Ubica en columnas por profundidad; las hojas se apilan y el padre queda centrado en sus destinos.
@@ -358,7 +374,7 @@ function conector({ x: x1, y: y1 }, { x: x2, y: y2 }) {
     const d = Math.max(60, Math.abs(x2 - x1) / 2);
     return `M${x1} ${y1} C${x1 + d} ${y1} ${x2 - d} ${y2} ${x2} ${y2}`;
   }
-  const mx = x1 + Math.min(40, (x2 - x1) / 2);
+  const mx = x1 + (x2 - x1) / 2;
   const dy = y2 - y1, r = Math.min(10, Math.abs(dy) / 2), s = Math.sign(dy);
   if (!r) return `M${x1} ${y1} H${x2}`;
   return `M${x1} ${y1} H${mx - r} Q${mx} ${y1} ${mx} ${y1 + s * r} V${y2 - s * r} Q${mx} ${y2} ${mx + r} ${y2} H${x2}`;
@@ -370,6 +386,17 @@ const svg = (tag, attrs = {}) => {
   return e;
 };
 
+let animTiempo = null; // nodo recién tildado como por tiempo: su tapa, su ⏱ y sus líneas entran animados
+let saleTiempo = null; // nodo recién destildado: lo mismo sale animado antes de redibujarlo sin tiempo
+const animTapa = id => animTiempo === id ? ' entra' : saleTiempo === id ? ' sale' : '';
+
+// Tapa gris con un reloj sobre las salidas que un nodo por tiempo deja apagadas (desde la fila `desde`)
+function tapaReloj(desde, anim) {
+  const ic = svg('svg', { viewBox: '0 0 24 24', width: 16, height: 16, fill: 'none', stroke: 'currentColor', 'stroke-width': 2, 'stroke-linecap': 'round' });
+  ic.append(svg('circle', { cx: 12, cy: 14, r: 8 }), svg('path', { d: 'M12 14v-4M10 2h4M12 2v4M19 7l1.5-1.5' }));
+  return el('div', { class: `tapa-reloj${anim}`, style: `top:${desde * 30}px` }, ic);
+}
+
 // Centro de un puerto en coordenadas del lienzo. Se mide en el DOM porque los estados tienen alto variable;
 // si el lienzo está oculto se usa la posición calculada.
 function puntoDe(n, sel, estimado) {
@@ -380,20 +407,25 @@ function puntoDe(n, sel, estimado) {
   return { x: n.pos.x + x + (e?.clientLeft || 0), y: n.pos.y + y + (e?.clientTop || 0) };
 }
 const puntoSalida = (n, s) => puntoDe(n, `.port.out[data-salida="${s.id}"]`,
-  { x: n.pos.x + NODO_W, y: n.pos.y + CAB_H + n.salidas.indexOf(s) * SAL_H + SAL_H / 2 });
+  { x: n.pos.x + NODO_W, y: n.pos.y + (s.tiempo ? CAB_H / 2 : CAB_H + filasDe(n).indexOf(s) * SAL_H + SAL_H / 2) });
 const puntoEntrada = n => puntoDe(n, '.port.in', { x: n.pos.x, y: n.pos.y + CAB_H / 2 });
 
 // Cada conexión: la línea visible + una más gruesa e invisible para poder hacerle clic
 function dibujarConectores() {
   const lineas = [];
   for (const n of nodos) {
+    const dups = repetidas(n);
     for (const s of n.salidas || []) {
       const h = nodo(s.destino);
       if (!h) continue;
       const d = conector(puntoSalida(n, s), puntoEntrada(h));
       const g = svg('g', { 'data-padre': n.id, 'data-salida': s.id });
       const on = seleccionado && (n.id === seleccionado || h.id === seleccionado);
-      g.append(svg('path', { d, class: on ? 'on' : '' }), svg('path', { d, class: 'hit' }));
+      // Nodo por tiempo: la primera salida es la que sigue (más viva), las demás quedan apagadas
+      // Sin texto (y sin pasar sola por ella) queda apagada con o sin tiempo: no se anima
+      const sinUso = !s.tiempo && !escucha(s) && pasaSola(n) !== s;
+      const tiempo = s.tiempo ? (n.timed ? ' vivo' + animTapa(n.id).replace(' ', ' cero-') : ' apagada') : n.timed ? ' off' + (sinUso ? '' : animTapa(n.id)) : sinUso ? ' apagada' : '';
+      g.append(svg('path', { d, class: `${on ? 'on' : ''}${tiempo}${dups.has(s.id) ? ' tapada' : ''}` }), svg('path', { d, class: 'hit' }));
       g.lastChild.append(svg('title'));
       g.lastChild.firstChild.textContent = 'Clic para desconectar';
       lineas.push(g);
@@ -411,16 +443,31 @@ function rehacerTodo() {
 function desconectar(padreId, salidaId) {
   const s = nodo(padreId)?.salidas?.find(x => x.id === salidaId);
   if (!s) return;
-  s.destino = null;
+  // La salida por defecto (sin texto) no tiene sentido desconectada: se quita
+  if (s.tiempo) nodo(padreId).salidas.splice(nodo(padreId).salidas.indexOf(s), 1);
+  else s.destino = null;
   rehacerTodo();
 }
 
 const nuevaSalida = (destino = null) => ({ id: nuevoId(), texto: '', disparadores: '', destino });
+// Estados guardados antes del output cero: la salida por la que pasaban solos pasa a ser la de tiempo
+function migrarCero(n) {
+  if (terminal(n) || salidaCero(n)) return;
+  const s0 = n.salidas?.[0];
+  if (n.timed && s0) {
+    if (escucha(s0)) n.salidas.unshift({ ...nuevaSalida(s0.destino), tiempo: true });
+    else s0.tiempo = true;
+  } else if (n.timed === undefined && pasaSola(n)) {
+    pasaSola(n).tiempo = true;
+    n.timed = true;
+  }
+}
 
 // Conecta una salida de `origen` con el estado `destino`. Sin salida, agrega una nueva.
 function conectar(origen, salidaId, destino) {
   const s = salidaId && origen.salidas?.find(x => x.id === salidaId);
   if (s) s.destino = destino.id;
+  else if (salidaId === CERO) (origen.salidas ??= []).unshift({ ...nuevaSalida(destino.id), tiempo: true });
   else (origen.salidas ??= []).push(nuevaSalida(destino.id));
   rehacerTodo();
 }
@@ -454,6 +501,7 @@ function resumenMensaje(n) {
 
 
 const ICONO_TACHO = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg>';
+const ICONO_CHAT = '<svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path fill="currentColor" d="M8 5.2v13.6a1 1 0 0 0 1.5.86l11-6.8a1 1 0 0 0 0-1.72l-11-6.8A1 1 0 0 0 8 5.2z"/></svg>';
 const ICONO_OK = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
 let confirmarTacho = null; // id del estado cuyo tachito espera el segundo clic
 
@@ -463,33 +511,40 @@ function renderArbol() {
   const divs = nodos.map(n => {
     const esRaiz = n.id === 'inicio';
     const esAccion = n.tipo === 'accion', esSalto = n.tipo === 'salto';
-    const salidas = terminal(n) ? [] : n.salidas || [];
+    const salidas = filasDe(n), cero = salidaCero(n), auto = n.timed ? null : pasaSola(n);
     const dups = repetidas(n);
-    const div = el('div', { class: `fnode${esAccion ? ' accion' : esSalto ? ' salto' : ''}${n.id === estadoPrueba ? ' actual' : ''}${dups.size ? ' con-error' : ''}${rutas.has(n.id) ? '' : ' suelto'}${n.id === seleccionado ? ' sel' : marcados.has(n.id) ? ' marcado' : ''}` },
+    const div = el('div', { class: `fnode${esAccion ? ' accion' : esSalto ? ' salto' : ''}${n.id === estadoPrueba ? ' actual' : ''}${espera?.nodo === n.id ? ' esperando' : ''}${dups.size ? ' con-error' : ''}${rutas.has(n.id) ? '' : ' suelto'}${n.id === seleccionado ? ' sel' : marcados.has(n.id) ? ' marcado' : ''}` },
       el('div', { class: 'fhead' },
-        esRaiz ? el('span', { class: 'num' }, '★') : el('span', { class: 'port in', title: 'Soltá acá una salida para conectar' }),
+        esRaiz ? el('span', { class: 'num raiz', title: 'Primer mensaje', innerHTML: ICONO_CHAT }) : el('span', { class: 'port in', title: 'Soltá acá una salida para conectar' }),
         esAccion ? el('span', { class: 'num' }, '⚙') : esSalto ? el('span', { class: 'num' }, '↪') : null,
         el('span', { class: 'txt' },
           el('b', { class: !esRaiz && !n.nombre ? 'vacio' : '' }, nombreDe(n)),
           el('small', {}, resumenNodo(n))),
-        terminal(n) || salidas.length > 1 ? null : el('span', { class: 'port out nueva', title: 'Arrastrá hasta un estado para agregar una respuesta' })),
+        n.timed ? el('span', { class: `reinicio${animTapa(n.id)}`, title: nodo(cero?.destino) ? `Pasa solo a ${nombreDe(nodo(cero.destino))} a los ${esperaDe(n)} s` : `Tras ${esperaDe(n)} s la charla se reinicia` }, `⏱ ${esperaDe(n)} s`)
+          : terminal(n) ? null : el('span', { class: 'reinicio apagado', title: auto ? `Pasa solo a ${nombreDe(nodo(auto.destino))} a los ${esperaDe(n)} s` : autoFin(n) ? `Tras ${esperaDe(n)} s la charla se reinicia` : 'No es por tiempo' }, `⏱ ${esperaDe(n)} s`),
+        terminal(n) ? null : el('span', { class: `port out cero${n.timed ? animTapa(n.id) : ' apagado'}`, 'data-salida': cero?.id || CERO,
+          title: n.timed ? 'Salida por tiempo: arrastrá hasta un estado para conectar' : 'Salida por tiempo (se usa solo si el estado es por tiempo)' })),
       salidas.length ? el('ul', { class: 'fsal' }, ...salidas.map(s => el('li', {
-        class: `${nodo(s.destino) ? '' : 'libre'}${dups.has(s.id) ? ' dup' : ''}`, 'data-salida': s.id,
-        title: dups.has(s.id) ? `Repetida: otra respuesta también escucha "${dups.get(s.id)}"` : '' },
+        class: `${nodo(s.destino) ? '' : 'libre'}${dups.has(s.id) ? ' tapada' : ''}${n.timed ? ' off' + animTapa(n.id) : ''}`, 'data-salida': s.id,
+        title: dups.has(s.id) ? `Apagada: una respuesta anterior ya escucha "${dups.get(s.id)}"` : '' },
         s.cualquiera
           ? el('span', { class: 'cualquiera' }, `✱ Cualquier respuesta${n.guardarEn ? ` → {${n.guardarEn}}` : ''}`)
           : el('span', { class: s.texto ? '' : 'vacio' }, s.texto || 'Sin texto'),
-        el('span', { class: 'port out', 'data-salida': s.id, title: 'Arrastrá hasta un estado para conectar' })))) : null);
+        el('span', { class: `port out${!n.timed && !escucha(s) && auto !== s ? ' apagado' : ''}`, 'data-salida': s.id, title: 'Arrastrá hasta un estado para conectar' }))),
+        n.timed ? tapaReloj(0, animTapa(n.id)) : null) : null);
     div.style.left = `${n.pos.x}px`;
     div.style.top = `${n.pos.y}px`;
     div.dataset.id = n.id;
-    if (n.id === seleccionado) {
+    if (n.id === barraEn()) {
       const confirmando = confirmarTacho === n.id;
       const filas = filasDe(n).length;
+      const varios = seleccionados().filter(x => x.id !== 'inicio').length;
+      const multi = marcados.size + (seleccionado ? 1 : 0) > 1;
       const quitar = confirmando ? 'Confirmar'
+        : multi ? `Eliminar ${varios} ${varios === 1 ? 'elemento' : 'elementos'}`
         : filas ? 'Quitar la última respuesta' : (esAccion ? 'Eliminar acción' : esSalto ? 'Eliminar salto' : 'Eliminar estado');
-      const tacho = el('button', { type: 'button', class: `add del${confirmando ? ' confirmar' : ''}${terminal(n) ? ' solo' : ''}`, title: quitar, 'aria-label': quitar, onclick: () => quitarUltima(n) });
-      if (esRaiz && !filas) tacho.disabled = true;
+      const tacho = el('button', { type: 'button', class: `add del${confirmando ? ' confirmar' : ''}${terminal(n) ? ' solo' : ''}`, title: quitar, 'aria-label': quitar, onclick: () => multi ? eliminarSeleccion(n) : quitarUltima(n) });
+      if (multi ? !varios : esRaiz && !filas) tacho.disabled = true;
       tacho.innerHTML = confirmando ? ICONO_OK : ICONO_TACHO;
       div.append(tacho);
       // Un nodo de acción es terminal: no tiene respuestas para agregar
@@ -498,6 +553,7 @@ function renderArbol() {
     return div;
   });
   $('#flowNodes').replaceChildren(...divs);
+  divs.filter(d => d.classList.contains('salto')).forEach(d => formaSalto.observe(d));
   dibujarConectores();
   $('#respCount').textContent = nodos.length - 1 || '';
 }
@@ -519,8 +575,8 @@ function renderArbol() {
       const desdeSalida = port.classList.contains('out');
       const s = n.salidas?.find(x => x.id === port.dataset.salida);
       const desde = !desdeSalida ? puntoEntrada(n)
-        : s ? puntoSalida(n, s) : puntoDe(n, '.port.out.nueva', { x: n.pos.x + NODO_W, y: n.pos.y + CAB_H / 2 });
-      gesto = { tipo: 'conectar', nodo: n, salida: s?.id || null, desdeSalida, desde, temp };
+        : s ? puntoSalida(n, s) : puntoDe(n, '.port.out.cero', { x: n.pos.x + NODO_W, y: n.pos.y + CAB_H / 2 });
+      gesto = { tipo: 'conectar', nodo: n, salida: s?.id || (port.dataset.salida === CERO ? CERO : null), desdeSalida, desde, temp };
       flow.classList.add('conectando');
       moverConexion(e);
     } else if (nodoEl) {
@@ -529,7 +585,7 @@ function renderArbol() {
       const grupo = (enSeleccion(n.id) ? nodos.filter(x => enSeleccion(x.id)) : [n])
         .map(x => ({ n: x, el: $(`.fnode[data-id="${x.id}"]`), px: x.pos.x, py: x.pos.y }));
       gesto = { tipo: 'nodo', nodo: n, grupo, x0: e.clientX, y0: e.clientY, movido: false, shift: e.shiftKey,
-        salida: e.target.closest('.fsal li')?.dataset.salida, nombre: !!e.target.closest('.fhead b') };
+        salida: e.target.closest('.fsal li')?.dataset.salida, nombre: !!e.target.closest('.fhead b'), reloj: !!e.target.closest('.fhead .reinicio') };
     } else {
       gesto = { tipo: 'pan', x0: e.clientX, y0: e.clientY, vx: vista.x, vy: vista.y, movido: false, linea: e.target.closest('.flow-edges g')?.dataset };
       flow.classList.add('panning');
@@ -618,6 +674,7 @@ function renderArbol() {
       seleccionar(g.nodo.id);
       if (g.salida) editarEnLienzo(g.nodo, g.salida);
       else if (g.nombre && g.nodo.id !== 'inicio') editarNombreEnLienzo(g.nodo);
+      else if (g.reloj) clicEnReloj(g.nodo);
       return;
     }
     cambio();
@@ -643,6 +700,7 @@ function renderArbol() {
 
 function seleccionar(id) {
   seleccionado = id;
+  ultimo = id;
   confirmarTacho = null;
   marcados.clear();
   renderArbol();
@@ -653,7 +711,8 @@ function seleccionar(id) {
 function marcar(id) {
   if (id === seleccionado) { seleccionado = null; renderDetalle(); }
   else if (marcados.has(id)) marcados.delete(id);
-  else marcados.add(id);
+  else { marcados.add(id); ultimo = id; }
+  if (!enSeleccion(ultimo)) ultimo = [...marcados].at(-1) ?? seleccionado;
   confirmarTacho = null;
   renderArbol();
 }
@@ -680,6 +739,30 @@ function editarEnLienzo(n, salidaId) {
   input.select();
 }
 
+// Clic en el ⏱ alterna el modo por tiempo; doble clic edita los segundos (el clic simple espera por si viene el segundo)
+let clicReloj = null;
+function clicEnReloj(n) {
+  if (clicReloj?.id === n.id) {
+    clearTimeout(clicReloj.t);
+    clicReloj = null;
+    return editarEsperaEnLienzo(n);
+  }
+  clearTimeout(clicReloj?.t);
+  clicReloj = { id: n.id, t: setTimeout(() => { clicReloj = null; alternarTiempo(n, !(n.timed ?? !!pasaSola(n))); }, 250) };
+}
+
+function editarEsperaEnLienzo(n) {
+  const r = $(`.fnode[data-id="${n.id}"] .fhead .reinicio`);
+  if (!r) return;
+  const input = el('input', { class: 'fsal-input espera-input', type: 'number', min: 0, step: 1, value: esperaDe(n), 'aria-label': 'Segundos de espera' });
+  input.addEventListener('input', () => { n.espera = Math.max(0, Number(input.value) || 0); cambio(); });
+  input.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === 'Escape') input.blur(); });
+  input.addEventListener('blur', rehacerTodo);
+  r.replaceWith(input);
+  input.focus();
+  input.select();
+}
+
 // Lo mismo para el nombre del estado, en su encabezado
 function editarNombreEnLienzo(n) {
   const b = $(`.fnode[data-id="${n.id}"] .fhead b`);
@@ -693,6 +776,20 @@ function editarNombreEnLienzo(n) {
   input.select();
 }
 
+// Contorno del salto en SVG al tamaño real del nodo: trazo parejo en las diagonales y punteado que sigue el borde
+const formaSalto = new ResizeObserver(entradas => entradas.forEach(({ target: d }) => {
+  const w = d.offsetWidth, h = d.offsetHeight, m = 1;
+  let svg = d.querySelector(':scope > .forma');
+  if (!svg) {
+    svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('class', 'forma');
+    svg.append(document.createElementNS('http://www.w3.org/2000/svg', 'path'));
+    d.prepend(svg);
+  }
+  svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+  svg.firstChild.setAttribute('d', `M${m} ${m}H${w - 22}L${w - m} ${h / 2}L${w - 22} ${h - m}H${m}L16 ${h / 2}Z`);
+}));
+
 // Nombre por defecto: "Estado n", "Acción n" o "Salto n", con n el primer número libre después de los de ese tipo
 const NOMBRES = { estado: 'Estado', accion: 'Acción', salto: 'Salto' };
 const tipoDe = n => NOMBRES[n.tipo] ? n.tipo : 'estado';
@@ -704,24 +801,39 @@ function nombreNuevo(tipo) {
 
 const nodoVacio = (tipo = 'estado') => tipo === 'accion' ? { id: nuevoId(), tipo, nombre: nombreNuevo(tipo), accion: null }
   : tipo === 'salto' ? { id: nuevoId(), tipo, nombre: nombreNuevo(tipo), objetivo: '' }
-  : { id: nuevoId(), tipo, nombre: nombreNuevo(tipo), mensajes: [{ tipo: 'texto', texto: '' }], salidas: [], formatoOpciones: 'lista' };
+  : { id: nuevoId(), tipo, nombre: nombreNuevo(tipo), mensajes: [{ tipo: 'texto', texto: '' }], salidas: [nuevaSalida()], formatoOpciones: 'lista' };
 
 // Un estado manda varios mensajes, en orden
 function editorMensajes(n) {
   n.mensajes ??= [];
   const rehacer = () => { editado(); renderDetalle(); };
+  let arrastrado = null;
   const items = n.mensajes.map((m, i) => {
-    const mover = d => { [n.mensajes[i], n.mensajes[i + d]] = [n.mensajes[i + d], n.mensajes[i]]; rehacer(); };
-    const tipo = el('select', { 'aria-label': 'Tipo de mensaje', onchange: () => { m.tipo = tipo.value; rehacer(); } },
-      ...Object.entries(TIPOS).map(([v, t]) => el('option', { value: v }, t)));
-    tipo.value = TIPOS[m.tipo] ? m.tipo : 'texto';
-    return el('div', { class: 'mensaje' },
+    const tipos = el('div', { class: 'segmented', role: 'radiogroup', 'aria-label': 'Tipo de mensaje' },
+      ...Object.entries(TIPOS).map(([v, t]) => el('button', {
+        type: 'button', role: 'radio', 'aria-checked': String((TIPOS[m.tipo] ? m.tipo : 'texto') === v),
+        onclick: () => { if (m.tipo !== v) { m.tipo = v; rehacer(); } },
+      }, t)));
+    // Se arrastra desde la manija; soltar sobre otra tarjeta la pone en su lugar
+    const tarjeta = el('div', { class: 'mensaje' },
       el('div', { class: 'mensaje-top' },
-        el('span', { class: 'num' }, String(i + 1)), tipo,
-        el('button', { type: 'button', class: 'icon-btn', title: 'Subir', 'aria-label': 'Subir', disabled: i === 0, onclick: () => mover(-1) }, '↑'),
-        el('button', { type: 'button', class: 'icon-btn', title: 'Bajar', 'aria-label': 'Bajar', disabled: i === n.mensajes.length - 1, onclick: () => mover(1) }, '↓'),
+        el('span', { class: 'grip', title: 'Arrastrá para reordenar', 'aria-hidden': 'true',
+          onmousedown: () => { tarjeta.draggable = true; }, onmouseup: () => { tarjeta.draggable = false; } }, '⠿'),
+        el('span', { class: 'num' }, String(i + 1)), tipos,
         el('button', { type: 'button', class: 'icon-btn', title: 'Quitar', 'aria-label': 'Quitar mensaje', onclick: () => { n.mensajes.splice(i, 1); rehacer(); } }, '×')),
       ...contenido(m));
+    tarjeta.addEventListener('dragstart', e => { arrastrado = i; e.dataTransfer.effectAllowed = 'move'; tarjeta.classList.add('arrastrando'); });
+    tarjeta.addEventListener('dragend', () => { tarjeta.draggable = false; tarjeta.classList.remove('arrastrando'); });
+    tarjeta.addEventListener('dragover', e => { if (arrastrado === null || arrastrado === i) return; e.preventDefault(); tarjeta.classList.add('destino'); });
+    tarjeta.addEventListener('dragleave', () => tarjeta.classList.remove('destino'));
+    tarjeta.addEventListener('drop', e => {
+      e.preventDefault();
+      if (arrastrado === null || arrastrado === i) return;
+      n.mensajes.splice(i, 0, n.mensajes.splice(arrastrado, 1)[0]);
+      arrastrado = null;
+      rehacer();
+    });
+    return tarjeta;
   });
   return el('div', { class: 'mensajes' }, ...items,
     el('button', { type: 'button', class: 'tree-add', onclick: () => { n.mensajes.push({ tipo: 'texto', texto: '' }); rehacer(); } }, '+ Agregar mensaje'));
@@ -989,37 +1101,24 @@ function editorAccion(n) {
     ayudaVariables('"Probar" la ejecuta de verdad con datos de prueba.'));
 }
 
-// Lo que escucha el estado: cada respuesta tiene su propia salida en el lienzo
-function editorSalidas(n) {
-  n.salidas ??= [];
-  const rehacer = () => { editado(); renderDetalle(); };
-  const entrada = (s, clave, attrs) => {
-    const i = el('input', { value: s[clave] || '', ...attrs });
-    i.addEventListener('input', () => { s[clave] = i.value; editado(); marcarRepetidas(n); });
-    return i;
-  };
-  const lista = el('div', { class: 'mensajes' },
-    ...n.salidas.map((s, i) => {
-      const destino = nodo(s.destino);
-      const mover = d => { [n.salidas[i], n.salidas[i + d]] = [n.salidas[i + d], n.salidas[i]]; rehacer(); };
-      return el('div', { class: `mensaje${s.cualquiera ? ' cualquiera' : ''}`, 'data-salida': s.id },
-        el('div', { class: 'mensaje-top' },
-          el('span', { class: 'num' }, s.cualquiera ? '✱' : String(i + 1)),
-          s.cualquiera
-            ? el('b', { class: 'accion-tipo' }, `Cualquier otra respuesta${n.guardarEn ? ` (se guarda en {${n.guardarEn}})` : ''}`)
-            : entrada(s, 'texto', { placeholder: 'hola', 'aria-label': 'Qué escucha' }),
-          el('button', { type: 'button', class: 'icon-btn', title: 'Subir', 'aria-label': 'Subir', disabled: i === 0, onclick: () => mover(-1) }, '↑'),
-          el('button', { type: 'button', class: 'icon-btn', title: 'Bajar', 'aria-label': 'Bajar', disabled: i === n.salidas.length - 1, onclick: () => mover(1) }, '↓'),
-          el('button', { type: 'button', class: 'icon-btn', title: 'Quitar', 'aria-label': 'Quitar respuesta', onclick: () => { n.salidas.splice(i, 1); rehacer(); } }, '×')),
-        s.cualquiera ? null : entrada(s, 'disparadores', { placeholder: 'También: buenas, buen día', 'aria-label': 'Otras formas de decirlo' }),
-        el('small', { class: 'error' }),
-        el('small', { class: 'help' }, 'Lleva a ',
-          destino ? el('button', { type: 'button', class: 'link', onclick: () => seleccionar(destino.id) }, nombreDe(destino))
-            : 'ningún estado: arrastrá su punto en el lienzo hasta uno.'));
-    }),
-    el('button', { type: 'button', class: 'tree-add', onclick: () => agregarSalida(n) }, '+ Agregar respuesta'));
-  requestAnimationFrame(() => marcarRepetidas(n));
-  return lista;
+function alternarTiempo(n, activo) {
+  if (activo) { n.timed = true; animTiempo = n.id; rehacerTodo(); animTiempo = null; return; }
+  // Al apagarlo, la tapa, el ⏱ y las líneas salen animados antes de redibujar sin tiempo
+  saleTiempo = n.id; renderArbol();
+  setTimeout(() => { saleTiempo = null; n.timed = false; rehacerTodo(); }, 200);
+}
+
+// Temporizado: no escucha; tras la espera sigue solo por la primera salida
+function temporizado(n) {
+  // Sin respuestas que escuchar ya pasa solo por tiempo: arranca tildado salvo que lo hayan destildado
+  const activo = n.timed ?? !!pasaSola(n);
+  const seg = el('input', { type: 'number', min: 0, step: 1, value: esperaDe(n), disabled: !activo, 'aria-label': 'Segundos de espera' });
+  seg.addEventListener('input', () => { n.espera = Math.max(0, Number(seg.value) || 0); editado(); renderArbol(); });
+  const check = el('input', { type: 'checkbox', checked: activo, onchange: () => {
+    alternarTiempo(n, check.checked);
+  } });
+  return el('div', { class: 'temporizado' }, el('label', { class: 'switch' }, check, el('span', {}, 'Nodo por tiempo')),
+    el('span', { class: `tiempo-seg${activo ? '' : ' off'}` }, seg, 'segundos'));
 }
 
 // Estado que pregunta algo: lo que conteste el cliente se guarda en una variable, y la charla sigue
@@ -1062,18 +1161,14 @@ function formatoOpciones(n, esRaiz) {
   ].filter(Boolean);
 }
 
-// Marca en el panel y en el lienzo las respuestas repetidas del estado, mientras se escribe
+// Marca en el lienzo las respuestas repetidas del estado, mientras se escribe
 function marcarRepetidas(n) {
   const dups = repetidas(n);
-  for (const card of $$(`#nodoEditor .mensaje[data-salida]`)) {
-    const frase = dups.get(card.dataset.salida);
-    card.classList.toggle('dup', !!frase);
-    card.querySelector('.error').textContent = frase ? `Repetida: otra respuesta de este estado también escucha "${frase}". El agente no sabría cuál elegir.` : '';
-  }
   for (const li of $$(`.fnode[data-id="${n.id}"] .fsal li`)) {
     const frase = dups.get(li.dataset.salida);
-    li.classList.toggle('dup', !!frase);
-    li.title = frase ? `Repetida: otra respuesta también escucha "${frase}"` : '';
+    li.classList.toggle('tapada', !!frase);
+    $(`.flow-edges g[data-padre="${n.id}"][data-salida="${li.dataset.salida}"] path:not(.hit)`)?.classList.toggle('tapada', !!frase);
+    li.title = frase ? `Apagada: una respuesta anterior ya escucha "${frase}"` : '';
   }
   $(`.fnode[data-id="${n.id}"]`)?.classList.toggle('con-error', dups.size > 0);
 }
@@ -1088,10 +1183,26 @@ function agregarSalida(n) {
 }
 
 function eliminarEstado(n) {
-  nodos = nodos.filter(x => x !== n);
-  for (const p of nodos) for (const s of p.salidas || []) if (s.destino === n.id) s.destino = null;
+  eliminarVarios([n]);
+}
+
+function eliminarVarios(lista) {
+  const ids = new Set(lista.filter(n => n.id !== 'inicio').map(n => n.id));
+  nodos = nodos.filter(x => !ids.has(x.id));
+  for (const p of nodos) for (const s of p.salidas || []) if (ids.has(s.destino)) s.destino = null;
   cambio();
   cerrarDetalle();
+}
+
+// Tachito con varios seleccionados: con confirmación, elimina todos (salvo el inicio)
+function eliminarSeleccion(n) {
+  if (confirmarTacho !== n.id) {
+    confirmarTacho = n.id;
+    renderArbol();
+    return;
+  }
+  confirmarTacho = null;
+  eliminarVarios(seleccionados());
 }
 
 // Tachito del estado: el primer clic pide confirmación; el segundo quita la última respuesta
@@ -1105,7 +1216,7 @@ function quitarUltima(n) {
   confirmarTacho = null;
   const filas = filasDe(n);
   if (filas.length) {
-    filas.pop();
+    n.salidas.splice(n.salidas.indexOf(filas.at(-1)), 1);
     rehacerTodo();
   } else if (n.id !== 'inicio') {
     eliminarEstado(n);
@@ -1146,7 +1257,7 @@ function renderDetalle() {
     input.select();
   } });
   lapiz.innerHTML = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4zM13.5 6.5l4 4"/></svg>';
-  const ruta = esRaiz ? el('h3', {}, 'Inicio') : el('div', { class: 'ruta' },
+  const ruta = esRaiz ? el('h3', {}, 'Primer mensaje') : el('div', { class: 'ruta' },
     ...(camino || []).slice(0, -1).flatMap(p => [
       el('button', { type: 'button', onclick: () => seleccionar(p.id) }, nombreDe(p)),
       el('span', {}, '›'),
@@ -1156,15 +1267,33 @@ function renderDetalle() {
     el('button', { type: 'button', class: 'btn btn-ghost btn-sm btn-danger', onclick: () => eliminarEstado(n) }, 'Eliminar'));
 
   if (n.tipo === 'salto') {
-    const nombres = [...new Set(nodos.filter(x => !terminal(x) && (x.id === 'inicio' || x.nombre)).map(nombreDe))];
-    const lista = el('datalist', { id: `saltos-${n.id}` }, ...nombres.map(v => el('option', { value: v })));
-    const objetivo = el('input', { value: n.objetivo || '', list: lista.id, placeholder: 'Nombre del estado', 'aria-label': 'Estado al que salta' });
-    const aviso = el('p', { class: 'help' });
-    const revisar = () => {
-      const ok = nombres.some(v => normalizar(v) === normalizar(objetivo.value));
-      aviso.textContent = !objetivo.value.trim() ? '' : ok ? '' : `No hay ningún estado llamado "${objetivo.value.trim()}": la charla va a responder como si no hubiera entendido.`;
+    // Un salto va por nombre: un nombre repetido o que ya no existe lo deja inhabilitado
+    // Mismo nombre que busca el motor: el primer mensaje se llama "Inicio" salvo que tenga otro
+    const cuantos = new Map();
+    nodos.filter(x => !terminal(x) && (x.id === 'inicio' || x.nombre)).forEach(x => {
+      const nombre = x.id === 'inicio' ? x.nombre || 'Inicio' : x.nombre, k = normalizar(nombre), c = cuantos.get(k);
+      cuantos.set(k, { nombre: c?.nombre || nombre, etiqueta: c?.etiqueta || (x.id === 'inicio' ? `${nombreDe(x)} (${nombre})` : nombre), total: (c?.total || 0) + 1 });
+    });
+    const errorDe = v => {
+      if (!v.trim()) return '';
+      const c = cuantos.get(normalizar(v));
+      return !c ? `No hay ningún estado llamado "${v.trim()}". Elegí otro.`
+        : c.total > 1 ? `Hay ${c.total} estados llamados "${c.nombre}": no sabe a cuál ir. Renombrá los repetidos.` : '';
     };
-    objetivo.addEventListener('input', () => { n.objetivo = objetivo.value; editado(); revisar(); });
+    const opciones = [...cuantos.values()];
+    if (n.objetivo?.trim() && !cuantos.has(normalizar(n.objetivo))) opciones.push({ nombre: n.objetivo, etiqueta: n.objetivo });
+    const objetivo = el('select', { 'aria-label': 'Estado al que salta' },
+      el('option', { value: '', disabled: true }, 'Elegí un estado'),
+      ...opciones.map(o => el('option', { value: o.nombre, class: errorDe(o.nombre) ? 'error' : '' }, errorDe(o.nombre) ? `⚠ ${o.etiqueta}` : o.etiqueta)));
+    objetivo.value = opciones.find(o => normalizar(o.nombre) === normalizar(n.objetivo || ''))?.nombre ?? '';
+    const aviso = el('p', { class: 'help error' });
+    const revisar = () => {
+      const error = errorDe(objetivo.value);
+      objetivo.classList.toggle('error', !!error);
+      aviso.hidden = !error;
+      aviso.textContent = error ? `Salto inhabilitado: ${error}` : '';
+    };
+    objetivo.addEventListener('change', () => { n.objetivo = objetivo.value; editado(); revisar(); });
     revisar();
     panel.replaceChildren(...[
       el('div', { class: 'nodo-top' }, ruta, cerrar),
@@ -1173,7 +1302,7 @@ function renderDetalle() {
       otros.length ? el('p', { class: 'help' }, 'También se llega desde: ',
         ...otros.flatMap((p, i) => [i ? ', ' : '', el('button', { type: 'button', class: 'link', onclick: () => seleccionar(p.id) }, nombreDe(p))])) : null,
       el('label', {}, 'Salta al estado'),
-      objetivo, lista, aviso,
+      objetivo, aviso,
       eliminar,
     ].filter(Boolean));
     return;
@@ -1194,7 +1323,6 @@ function renderDetalle() {
 
   panel.replaceChildren(...[
     el('div', { class: 'nodo-top' }, ruta, cerrar),
-    esRaiz ? el('p', { class: 'help' }, 'Donde arranca la charla: lo primero que recibe el cliente cuando escribe.') : null,
     !camino ? el('p', { class: 'help' }, 'Ninguna respuesta lleva a este estado. Arrastrá el punto de una respuesta de otro estado hasta acá.') : null,
     otros.length ? el('p', { class: 'help' }, 'También se llega desde: ',
       ...otros.flatMap((p, i) => [i ? ', ' : '', el('button', { type: 'button', class: 'link', onclick: () => seleccionar(p.id) }, nombreDe(p))])) : null,
@@ -1202,9 +1330,8 @@ function renderDetalle() {
     editorMensajes(n),
     ayudaVariables(),
     guardarEnVariable(n),
-    el('label', {}, 'Respuestas que escucha'),
-    editorSalidas(n),
-    ...((n.salidas || []).some(s => !s.cualquiera) ? formatoOpciones(n, esRaiz) : []),
+    terminal(n) ? null : temporizado(n),
+    ...(!n.timed && filasDe(n).some(s => !s.cualquiera) ? formatoOpciones(n, esRaiz) : []),
     esRaiz ? null : eliminar,
   ].filter(Boolean));
 }
@@ -1213,6 +1340,7 @@ function cargarFlujo(f) {
   nodos = structuredClone(f?.nodos || []);
   if (!nodo('inicio')) nodos.unshift({ id: 'inicio', mensajes: [], salidas: [] });
   for (const n of nodos) if (n.id !== 'inicio' && !n.nombre?.trim()) n.nombre = nombreNuevo(tipoDe(n));
+  for (const n of nodos) migrarCero(n);
   if (nodos.some(n => !n.pos)) ordenar();
   if (!nodo(seleccionado)) seleccionado = null;
   renderArbol();
@@ -1305,47 +1433,6 @@ async function revisarServidor() {
   $('#servidorTexto').textContent = TEXTOS_SERVIDOR[estado] || TEXTOS_SERVIDOR.operativo;
 }
 setInterval(revisarServidor, 30000);
-
-/* ---------- Borrar agente ---------- */
-(() => {
-  const modal = $('#modalBorrar'), input = $('#modalBorrarInput'), confirmar = $('#modalBorrarConfirmar'), error = $('#modalBorrarError');
-  const nombreActual = () => form.elements['agente.nombre'].value.trim() || 'Asistente';
-  const cerrar = () => { modal.hidden = true; };
-
-  $('#borrarAgente').onclick = () => {
-    $('#modalBorrarNombre').textContent = nombreActual();
-    input.value = '';
-    confirmar.disabled = true;
-    error.hidden = true;
-    modal.hidden = false;
-    input.focus();
-  };
-  input.addEventListener('input', () => { confirmar.disabled = input.value.trim() !== nombreActual(); });
-  input.addEventListener('keydown', e => { if (e.key === 'Enter' && !confirmar.disabled) confirmar.click(); });
-  $('#modalBorrarCancelar').onclick = cerrar;
-  modal.addEventListener('click', e => { if (e.target === modal) cerrar(); });
-  document.addEventListener('keydown', e => { if (e.key === 'Escape' && !modal.hidden) cerrar(); });
-
-  confirmar.onclick = async () => {
-    confirmar.disabled = true;
-    // Que no quede un guardado pendiente sobre un agente que ya no existe
-    clearTimeout(timerGuardado);
-    timerGuardado = null;
-    try {
-      await guardando;
-      await api('DELETE', `/api/bots/${botId}`);
-      eventos?.close();
-      bots = bots.filter(b => b.id !== botId);
-      botId = null;
-      cerrar();
-      await crearAgente();
-    } catch (err) {
-      error.textContent = `No se pudo borrar: ${err.message}`;
-      error.hidden = false;
-      confirmar.disabled = false;
-    }
-  };
-})();
 
 /* ---------- Conexión ---------- */
 const ETIQUETAS = { desconectado: 'Desconectado', conectando: 'Desconectado', esperando_qr: 'Desconectado', conectado: 'Conectado', error: 'Error' };
@@ -1573,8 +1660,45 @@ function reiniciarChat(avisarServer = true) {
   if (avisarServer && botId) api('POST', `/api/bots/${botId}/probar`, { reiniciar: true, sesion: sesionPrueba }).catch(() => {});
   sesionPrueba = nuevaSesion();
   chat.replaceChildren();
+  if (espera) cancelAnimationFrame(espera.raf);
+  espera = null;
   estadoPrueba = null;
   renderArbol();
+}
+
+// Muestra la respuesta del servidor; si el estado no escucha, espera y pasa solo al siguiente resaltando el estado de a poco
+function pintarRespuesta(res) {
+  res.mensajes.forEach(mostrarMensaje);
+  (res.acciones || []).forEach(a => burbuja(`accion${a.ok ? '' : ' fallo'}`, `${a.ok ? '⚙' : '⚠'} ${a.detalle}`));
+  estadoPrueba = res.respuestaId || res.nodoActual;
+  renderArbol();
+  if (!res.auto) return;
+  const ms = res.auto.espera * 1000, sesion = sesionPrueba, desde = Date.now();
+  espera = { nodo: res.respuestaId };
+  renderArbol();
+  const paso = () => {
+    if (sesion !== sesionPrueba || !espera) return;
+    const p = ms ? Math.min(1, (Date.now() - desde) / ms) : 1;
+    $(`.fnode[data-id="${espera.nodo}"]`)?.style.setProperty('--p', p);
+    if (p < 1) { espera.raf = requestAnimationFrame(paso); return; }
+    espera = null;
+    if (res.auto.destino) avanzarChat(res.auto.destino, sesion);
+    else { estadoPrueba = 'inicio'; renderArbol(); }
+  };
+  paso();
+}
+
+async function avanzarChat(destino, sesion) {
+  const escribiendo = burbuja('bot escribiendo', el('i'), el('i'), el('i'));
+  try {
+    const res = await api('POST', `/api/bots/${botId}/probar`, { avanzar: destino, sesion });
+    escribiendo.remove();
+    if (sesion === sesionPrueba) pintarRespuesta(res);
+  } catch (err) {
+    escribiendo.className = 'msg bot';
+    escribiendo.textContent = `No pude responder: ${err.message}`;
+  }
+  bajar();
 }
 
 $('#composer').onsubmit = async e => {
@@ -1584,6 +1708,7 @@ $('#composer').onsubmit = async e => {
   if (!texto || !botId) return;
   input.value = '';
   input.dispatchEvent(new Event('input'));
+  if (espera) { cancelAnimationFrame(espera.raf); espera = null; renderArbol(); }
   burbuja('yo', texto);
   const esperando = burbuja('bot escribiendo', el('i'), el('i'), el('i'));
   $('#tEstado').textContent = 'escribiendo…';
@@ -1591,11 +1716,8 @@ $('#composer').onsubmit = async e => {
     await guardarPendiente();
     const res = await api('POST', `/api/bots/${botId}/probar`, { texto, sesion: sesionPrueba });
     esperando.remove();
-    res.mensajes.forEach(mostrarMensaje);
-    (res.acciones || []).forEach(a => burbuja(`accion${a.ok ? '' : ' fallo'}`, `${a.ok ? '⚙' : '⚠'} ${a.detalle}`));
+    pintarRespuesta(res);
     chat.append(el('div', { class: 'fuente' }, ...etiquetaFuente(res)));
-    estadoPrueba = res.respuestaId || res.nodoActual;
-    renderArbol();
   } catch (err) {
     esperando.className = 'msg bot';
     esperando.textContent = `No pude responder: ${err.message}`;

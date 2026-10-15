@@ -40,7 +40,7 @@
   <nav class="tabs" aria-label="Secciones">
     <ul class="sections">
       <li><button type="button" data-sec="comportamiento">General</button></li>
-      <li><button type="button" data-sec="respuestas">Respuestas <span class="count" id="respCount"></span></button></li>
+      <li><button type="button" data-sec="respuestas">Comportamiento <span class="count" id="respCount"></span></button></li>
       <li><button type="button" data-sec="conversaciones">Conversaciones <span class="count" id="logCount"></span></button></li>
       <li><button type="button" data-sec="planillas">Planillas</button></li>
       <li><button type="button" data-sec="metricas">Métricas</button></li>
@@ -138,13 +138,6 @@
           </div>
           <div class="actions">
             <button type="button" class="btn btn-ghost" id="btnLogout" hidden>Desvincular número</button>
-          </div>
-        </div>
-        <div class="card zona-peligro">
-          <h3>Borrar agente</h3>
-          <p class="help">Elimina el agente con sus respuestas, archivos y métricas, y lo desvincula de WhatsApp. No se puede deshacer.</p>
-          <div class="actions">
-            <button type="button" class="btn btn-sm btn-borrar" id="borrarAgente">Borrar agente</button>
           </div>
         </div>
       </section>
@@ -271,22 +264,6 @@
       </div>
     </div>
   </aside>
-</div>
-
-<!-- Confirmación para borrar un agente -->
-<div class="modal" id="modalBorrar" hidden>
-  <div class="card modal-card" role="dialog" aria-modal="true" aria-labelledby="modalBorrarTitulo">
-    <h3 id="modalBorrarTitulo">¿Borrar este agente?</h3>
-    <p class="help">Se borran sus respuestas, archivos y métricas, y se desvincula de WhatsApp. No se puede deshacer.</p>
-    <label>Para confirmar, escribí el nombre del agente: <b id="modalBorrarNombre"></b>
-      <input id="modalBorrarInput" autocomplete="off">
-    </label>
-    <p class="help mal" id="modalBorrarError" hidden></p>
-    <div class="modal-actions">
-      <button type="button" class="btn btn-outline btn-sm" id="modalBorrarCancelar">Cancelar</button>
-      <button type="button" class="btn btn-sm btn-borrar" id="modalBorrarConfirmar" disabled>Borrar agente</button>
-    </div>
-  </div>
 </div>
 
 <script src="app.js" type="module"></script>
