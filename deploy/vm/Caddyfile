@@ -1,7 +1,0 @@
-origen-armatuagente.sisoftwaresolutions.com {
-	@sinsecreto not header X-Origin-Secret {env.ORIGIN_SECRET}
-	respond @sinsecreto 403
-	reverse_proxy 127.0.0.1:3210 {
-		flush_interval -1
-	}
-}

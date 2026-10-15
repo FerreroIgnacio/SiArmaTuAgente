@@ -1,22 +1,26 @@
-import { mkdirSync } from 'node:fs';
-import { readFile, rm, writeFile } from 'node:fs/promises';
-import path from 'node:path';
-import { DATA_DIR } from './store.js';
+import { env } from 'cloudflare:workers';
+import { cifrar, descifrar } from './cifrado.js';
+import { db } from './store.js';
 
-// Cuenta de Google del dueño para las acciones de Sheets. Se guarda el refresh token por usuario.
+// Cuenta de Google del dueño para las acciones de Sheets. Se guarda el refresh token por usuario (tabla google).
 // Se pide drive.file (no sensible, sin la advertencia de app no verificada): solo da acceso a las planillas
 // que crea la app, por eso las planillas se crean desde acá.
-const DIR = path.join(DATA_DIR, 'google');
-mkdirSync(DIR, { recursive: true });
-
 const DRIVE_FILE = 'https://www.googleapis.com/auth/drive.file';
-export const SCOPES_INTEGRACION = ['openid', 'email', DRIVE_FILE];
+// Sin openid/email: así Google muestra una sola pantalla (la del permiso), no además la de "volver a acceder"
+export const SCOPES_INTEGRACION = [DRIVE_FILE];
 
-const archivo = sub => path.join(DIR, `${String(sub).replace(/[^\w-]/g, '')}.json`);
 const accesos = new Map(); // sub → { token, vence }
 
+// El refresh token se guarda cifrado (ver cifrado.js): una copia de la base sola no alcanza para entrar al Drive de nadie
+const escribir = (sub, { refresh_token, email, scope }) =>
+  db().prepare('INSERT INTO google (sub, datos) VALUES (?1, ?2) ON CONFLICT(sub) DO UPDATE SET datos = ?2')
+    .bind(String(sub), JSON.stringify({ refresh: cifrar(refresh_token), email, scope })).run();
+
 async function leer(sub) {
-  try { return JSON.parse(await readFile(archivo(sub), 'utf8')); } catch { return null; }
+  const fila = await db().prepare('SELECT datos FROM google WHERE sub = ?').bind(String(sub)).first();
+  if (!fila) return null;
+  const c = JSON.parse(fila.datos);
+  try { return { ...c, refresh_token: descifrar(c.refresh) }; } catch { return null; }
 }
 
 export async function guardarCuenta(sub, { refresh_token, email, scope }) {
@@ -24,7 +28,7 @@ export async function guardarCuenta(sub, { refresh_token, email, scope }) {
   // Google solo manda el refresh token la primera vez que se da permiso: conservar el anterior
   const refresh = refresh_token || previa?.refresh_token;
   if (!refresh) throw new Error('Google no devolvió un refresh token');
-  await writeFile(archivo(sub), JSON.stringify({ refresh_token: refresh, email, scope }, null, 2), { mode: 0o600 });
+  await escribir(sub, { refresh_token: refresh, email, scope });
   accesos.delete(sub);
 }
 
@@ -44,29 +48,30 @@ export async function desconectarGoogle(sub) {
   if (c?.refresh_token) {
     await fetch(`https://oauth2.googleapis.com/revoke?token=${encodeURIComponent(c.refresh_token)}`, { method: 'POST' }).catch(() => {});
   }
-  await rm(archivo(sub), { force: true });
+  await db().prepare('DELETE FROM google WHERE sub = ?').bind(String(sub)).run();
   accesos.delete(sub);
 }
 
-async function tokenDe(sub) {
+export async function tokenDe(sub, { conVencimiento = false } = {}) {
   const cache = accesos.get(sub);
-  if (cache && cache.vence > Date.now() + 60000) return cache.token;
+  if (cache && cache.vence > Date.now() + 60000) return conVencimiento ? cache : cache.token;
   const c = await leer(sub);
   if (!c) throw new Error('La cuenta de Google no está conectada (General → Integraciones)');
   const r = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
-      client_id: process.env.GOOGLE_CLIENT_ID,
-      client_secret: process.env.GOOGLE_CLIENT_SECRET,
+      client_id: env.GOOGLE_CLIENT_ID,
+      client_secret: env.GOOGLE_CLIENT_SECRET,
       refresh_token: c.refresh_token,
       grant_type: 'refresh_token',
     }),
   });
   const data = await r.json();
   if (!r.ok) throw new Error(`Google: ${data.error_description || data.error}. Volvé a conectar la cuenta.`);
-  accesos.set(sub, { token: data.access_token, vence: Date.now() + data.expires_in * 1000 });
-  return data.access_token;
+  const acceso = { token: data.access_token, vence: Date.now() + data.expires_in * 1000 };
+  accesos.set(sub, acceso);
+  return conVencimiento ? acceso : acceso.token;
 }
 
 async function api(sub, metodo, url, body) {
@@ -78,6 +83,26 @@ async function api(sub, metodo, url, body) {
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(`Google: ${data.error?.message || r.status}`);
   return data;
+}
+
+// Contenido de un archivo del Drive del dueño (para adjuntarlo a un mail) → { datos, tipo }. Se usa en memoria, no se guarda
+export async function bajarArchivo(sub, id) {
+  const r = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(id)}?alt=media`, { headers: { Authorization: `Bearer ${await tokenDe(sub)}` } });
+  if (!r.ok) throw new Error(`Google Drive: no se pudo leer el archivo (${r.status})`);
+  return { datos: await r.arrayBuffer(), tipo: r.headers.get('content-type') || 'application/octet-stream' };
+}
+
+// Archivo que mandó un cliente por la API de Meta → Drive del dueño ({ url: 'drive:<id>', link }), como hace la página con WhatsApp personal
+export async function subirArchivo(sub, datos, tipo, nombre) {
+  const cuerpo = new FormData();
+  cuerpo.append('metadata', new Blob([JSON.stringify({ name: nombre || 'archivo', mimeType: tipo })], { type: 'application/json' }));
+  cuerpo.append('file', new Blob([datos], { type: tipo }));
+  const r = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink', {
+    method: 'POST', headers: { Authorization: `Bearer ${await tokenDe(sub)}` }, body: cuerpo,
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(`Google Drive: ${data.error?.message || r.status}`);
+  return { url: `drive:${data.id}`, link: data.webViewLink || `https://drive.google.com/file/d/${data.id}/view` };
 }
 
 /* ---------- Sheets ---------- */
@@ -100,6 +125,12 @@ export async function crearPlanilla(sub, { titulo, encabezados = [] }) {
     await api(sub, 'PUT', `${base(f.id)}/values/${rango(hoja, 'A1')}?valueInputOption=RAW`, { values: [encabezados] });
   }
   return { id: f.id, url: f.webViewLink || `https://docs.google.com/spreadsheets/d/${f.id}/edit`, hoja };
+}
+
+// Manda la planilla a la papelera del Drive del dueño (se puede recuperar desde Drive)
+export async function borrarPlanilla(sub, planilla) {
+  await api(sub, 'PATCH', `https://www.googleapis.com/drive/v3/files/${idPlanilla(planilla)}`, { trashed: true });
+  previas.clear();
 }
 
 // Planillas a las que tiene acceso la app (con drive.file: las que creó), de la más reciente a la más vieja
@@ -152,7 +183,9 @@ export async function actualizarFila(sub, { planilla, hoja, buscarColumna, busca
   const i = values.findIndex(([v]) => String(v ?? '').trim().toLowerCase() === String(buscarValor).trim().toLowerCase());
   if (i < 0) {
     if (!crear) return { encontrada: false };
-    await agregarFila(sub, { planilla, hoja, columnas: [{ columna: col, valor: buscarValor }, ...columnas] });
+    // El valor buscado viene del cliente: si parece una fórmula va como texto (ver celda en acciones.js)
+    const valor = /^[=+\-@\t\r]/.test(buscarValor) && !/^[-+]?\d+([.,]\d+)?$/.test(buscarValor) ? `'${buscarValor}` : buscarValor;
+    await agregarFila(sub, { planilla, hoja, columnas: [{ columna: col, valor }, ...columnas] });
     return { encontrada: false, agregada: true };
   }
   await api(sub, 'POST', `${base(id)}/values:batchUpdate`, {

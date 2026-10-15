@@ -9,53 +9,75 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/styles.css">
-<style>
-  .legal{max-width:760px;margin:0 auto;padding:40px 16px 64px;line-height:1.6;}
-  .legal header{display:flex;align-items:center;gap:10px;margin-bottom:28px;}
-  .legal header .mark{width:32px;height:32px;color:var(--accent);}
-  .legal header a{display:flex;align-items:center;gap:10px;color:var(--ink);text-decoration:none;font:600 16px var(--font-head);}
-  .legal h1{font:600 28px/1.2 var(--font-head);margin-bottom:6px;}
-  .legal h2{font:600 18px var(--font-head);margin:28px 0 8px;}
-  .legal p,.legal li{color:#3d3631;}
-  .legal ul{padding-left:20px;display:grid;gap:4px;}
-  .legal .fecha{color:var(--muted);font-size:13px;}
-  .legal img{display:block;max-width:100%;border:1px solid #e6dfd8;border-radius:10px;margin:12px 0;}
-  .legal img.angosta{max-width:360px;}
-  .legal a{color:var(--accent-dark);}
-</style>
 </head>
 <body>
-<main class="legal">
-  <header>
-    <a href="/">
-      <svg class="mark" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-        <circle cx="50" cy="50" r="46" stroke="currentColor" stroke-width="5"/>
-        <text x="50" y="66" text-anchor="middle" font-family="Arial, sans-serif" font-weight="800" font-size="48" fill="currentColor">Si</text>
-      </svg>
-      Si Arma Tu Agente
-    </a>
-  </header>
+<header class="articulo-top">
+  <span class="brand">
+    <a class="brand-si brand-empresa" href="https://sisoftwaresolutions.com" target="_blank" rel="noopener" aria-label="Si soluciones en software"><svg class="mark" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <circle cx="50" cy="50" r="46" stroke="currentColor" stroke-width="5"/>
+      <text x="50" y="66" text-anchor="middle" font-family="Arial, sans-serif" font-weight="800" font-size="48" fill="currentColor">Si</text>
+    </svg><span>Si soluciones en software</span></a>
+    <span class="brand-sep">/</span>
+    <a class="brand-si" href="/">Arma tu agente</a>
+    <span class="brand-sep">/</span>
+    <a class="brand-si brand-actual" href="" aria-current="page"><span>Variables</span></a>
+  </span>
+</header>
+<main class="articulo">
+  <a class="volver" href="/"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>Volver</a>
 
   <h1>Cómo definir una variable</h1>
-  <p class="fecha">Guardá lo que responde el cliente y usalo en tus mensajes y acciones.</p>
+  <p class="bajada">Guardá lo que responde el cliente y usalo después en tus mensajes y acciones.</p>
 
-  <h2>Variables que ya existen</h2>
-  <p>En cualquier texto podés usar <code>{nombre}</code>, <code>{telefono}</code>, <code>{mensaje}</code>, <code>{fecha}</code> y <code>{hora}</code>.</p>
+  <section id="existentes">
+    <h2>Variables que ya existen</h2>
+    <p>Están disponibles en cualquier texto, sin configurar nada:</p>
+    <table class="tabla-vars">
+      <tr><td><code>{nombre}</code></td><td>El nombre del cliente en WhatsApp.</td></tr>
+      <tr><td><code>{telefono}</code></td><td>Su número de teléfono.</td></tr>
+      <tr><td><code>{mensaje}</code></td><td>El último mensaje que mandó.</td></tr>
+      <tr><td><code>{fecha}</code> · <code>{hora}</code></td><td>La fecha y la hora del momento en que se manda el mensaje.</td></tr>
+      <tr><td><code>{opciones}</code></td><td>Las opciones del estado actual, numeradas como las ve el cliente.</td></tr>
+    </table>
+  </section>
 
-  <h2>Definir una variable propia</h2>
-  <p>Abrí un estado en <b>Respuestas</b>: el panel de la derecha tiene el campo para la variable.</p>
-  <img class="angosta" src="/ayuda/panel-estado.png" alt="Panel de un estado con el campo para guardar la respuesta en una variable">
-  <ul>
-    <li>Elegí un estado que le pregunte algo al cliente (por ejemplo, "¿Cómo te llamás?").</li>
-    <li>En el panel del estado, completá <b>Guardar lo que responda en una variable</b> con un nombre, por ejemplo <code>nombre_cliente</code>.</li>
-    <li>Conectá la salida <b>Cualquier respuesta</b> (se agrega sola) al estado que sigue.</li>
-  </ul>
-  <img class="angosta" src="/ayuda/campo-variable.png" alt="Campo Guardar lo que responda en una variable">
-  <p>El nombre va en minúsculas, sin tildes ni espacios; se corrige solo mientras escribís.</p>
+  <section id="propia">
+    <h2>Definir una variable propia</h2>
+    <figure class="alta">
+      <img src="/ayuda/panel-estado.png" alt="Panel de un estado con el campo para guardar la respuesta en una variable">
+      <figcaption>El panel de un estado</figcaption>
+    </figure>
+    <p>Abrí un estado en <b>Respuestas</b>: el panel de la derecha tiene el campo para la variable.</p>
+    <ol>
+      <li>Elegí un estado que le pregunte algo al cliente (por ejemplo, "¿Cómo te llamás?").</li>
+      <li>En el panel del estado, completá <b>Guardar lo que responda en una variable</b> con un nombre, por ejemplo <code>nombre_cliente</code>.</li>
+      <li>Conectá la salida <b>Cualquier respuesta</b> (se agrega sola) al estado que sigue.</li>
+    </ol>
+    <figure class="campo">
+      <img src="/ayuda/campo-variable.png" alt="Campo Guardar lo que responda en una variable">
+      <figcaption>El campo donde se nombra la variable</figcaption>
+    </figure>
+    <p class="nota"><b>Ojo:</b> si un mensaje usa una variable que todavía no tiene valor, el agente manda el texto tal cual, por ejemplo <code>{nombre_cliente}</code>. Probalo con <b>Probar agente</b> antes de publicarlo.</p>
+  </section>
 
-  <h2>Usarla</h2>
-  <p>En los mensajes y en las acciones (mail, WhatsApp, Google Sheets) escribila entre llaves: <code>Hola {nombre_cliente}, ¡gracias por escribirnos!</code></p>
-  <p><a href="/">← Volver a los agentes</a></p>
+  <section id="usarla">
+    <h2>Usarla</h2>
+    <p>En los mensajes y en las acciones (mail, WhatsApp, Google Sheets) escribila entre llaves. Al mandarse, se reemplaza por lo que respondió el cliente:</p>
+    <p class="ejemplo">Hola <code>{nombre_cliente}</code>, ¡gracias por escribirnos! Te contactamos al <code>{telefono}</code>.</p>
+    <p>En una acción de Google Sheets, por ejemplo, podés poner <code>{nombre_cliente}</code> en una columna y <code>{fecha}</code> en otra para armar una lista de contactos sola.</p>
+  </section>
+
+  <section id="consejos">
+    <h2>Consejos</h2>
+    <ul>
+      <li>Usá nombres que digan qué guardan: <code>direccion_envio</code> es más claro que <code>dato2</code>.</li>
+      <li>Una variable vale para toda la charla con ese cliente: la podés usar en cualquier estado posterior.</li>
+      <li>Si el cliente vuelve a pasar por el mismo estado, la variable se pisa con la respuesta nueva.</li>
+      <li>El nombre va en minúsculas, sin tildes ni espacios; se corrige solo mientras escribís.</li>
+      <li>Si el cliente manda un archivo (foto, documento, audio), la variable lo guarda: en un mail o WhatsApp va adjunto, y en Google Sheets queda el link.</li>
+    </ul>
+  </section>
 </main>
+<script src="/ayuda.js"></script>
 </body>
 </html>

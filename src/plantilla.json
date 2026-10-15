@@ -1,0 +1,400 @@
+{
+ "negocio": {
+  "nombre": "Bazar La Casona",
+  "rubro": "Bazar",
+  "descripcion": "Bazar de barrio: vajilla, cocina y deco. Envíos en el día en CABA.",
+  "horarios": "Lunes a sábados de 10 a 19 hs",
+  "ubicacion": "Av. Cabildo 2150, CABA",
+  "contactoHumano": "+5491155550142"
+ },
+ "agente": {
+  "nombre": "Casona",
+  "fallback": "Perdón, no te entendí. Elegí una opción o escribí *menu* para volver al inicio.",
+  "despedida": "Gracias por escribirnos. ¡Hasta la próxima!",
+  "usarLLM": false
+ },
+ "reglas": {
+  "ignorarGrupos": true
+ },
+ "flujo": {
+  "nodos": [
+   {
+    "id": "inicio",
+    "nombre": "Inicio",
+    "mensajes": [
+     {
+      "tipo": "texto",
+      "texto": "¡Hola {nombre}! Bienvenido a *Bazar La Casona*\nVajilla, cocina y deco para tu casa.\n\n¿En qué te ayudo?"
+     }
+    ],
+    "salidas": [
+     {
+      "id": "f9bca9cd-5e14-4426-aa0c-2ac852f2a8f1",
+      "texto": "Ver catálogo y precios",
+      "disparadores": "catalogo, precios, precio, lista, productos",
+      "destino": "catalogo"
+     },
+     {
+      "id": "60f4f2a8-fd65-4f2b-8613-95e63b4399ef",
+      "texto": "Hacer un pedido",
+      "disparadores": "pedido, comprar, encargar, quiero",
+      "destino": "categoria"
+     },
+     {
+      "id": "2fab6083-048c-4881-8c2e-40b8818c16c5",
+      "texto": "Consultar por foto",
+      "disparadores": "foto, imagen, tienen esto",
+      "destino": "foto"
+     },
+     {
+      "id": "8ba2decc-d91f-4364-b62c-8b2b8b2756db",
+      "texto": "Horarios y ubicación",
+      "disparadores": "horario, horarios, direccion, donde, abren, contacto",
+      "destino": "ubicacion"
+     }
+    ],
+    "formatoOpciones": "lista",
+    "pos": {
+     "x": 0,
+     "y": 350
+    }
+   },
+   {
+    "id": "catalogo",
+    "nombre": "Catálogo",
+    "mensajes": [
+     {
+      "tipo": "imagen",
+      "url": "/plantilla/catalogo-casona.png",
+      "texto": "Lo más pedido de la semana"
+     },
+     {
+      "tipo": "documento",
+      "url": "/plantilla/lista-precios-casona.pdf",
+      "nombreArchivo": "Lista de precios La Casona.pdf",
+      "texto": "Y acá la lista completa"
+     }
+    ],
+    "salidas": [
+     {
+      "id": "1e2ceb33-f8b1-4df7-ba75-15ccb4a005ee",
+      "texto": "Hacer un pedido",
+      "disparadores": "pedido, comprar",
+      "destino": "salto-pedido"
+     }
+    ],
+    "formatoOpciones": "lista",
+    "pos": {
+     "x": 320,
+     "y": 0
+    }
+   },
+   {
+    "id": "salto-pedido",
+    "tipo": "salto",
+    "nombre": "Ir a Categoría",
+    "objetivo": "Categoría",
+    "pos": {
+     "x": 640,
+     "y": 0
+    }
+   },
+   {
+    "id": "categoria",
+    "nombre": "Categoría",
+    "mensajes": [],
+    "salidas": [
+     {
+      "id": "59944b65-d368-45ee-bccd-8d2ba5febc54",
+      "texto": "Vajilla",
+      "disparadores": "",
+      "destino": "cantidad"
+     },
+     {
+      "id": "b1d3ee77-c9fd-4f5d-8c72-0b8f7b7c8aac",
+      "texto": "Cocina",
+      "disparadores": "",
+      "destino": "cantidad"
+     },
+     {
+      "id": "365b8874-68a1-4656-854f-ee19ce8514d1",
+      "texto": "Deco",
+      "disparadores": "",
+      "destino": "cantidad"
+     }
+    ],
+    "formatoOpciones": "encuesta",
+    "pos": {
+     "x": 320,
+     "y": 160
+    },
+    "pregunta": "¿Qué estás buscando?",
+    "guardarEn": "categoria"
+   },
+   {
+    "id": "cantidad",
+    "nombre": "Cantidad",
+    "mensajes": [
+     {
+      "tipo": "texto",
+      "texto": "¿Cuántas unidades? Escribí solo el número"
+     }
+    ],
+    "salidas": [
+     {
+      "id": "7d5204ae-3ab4-4a78-8514-74ab78434e28",
+      "texto": "",
+      "disparadores": "",
+      "destino": "resumen",
+      "numero": true
+     }
+    ],
+    "formatoOpciones": "lista",
+    "pos": {
+     "x": 640,
+     "y": 160
+    },
+    "guardarEn": "cantidad",
+    "numerico": "entero",
+    "msgNumero": "Escribime solo el número, por ejemplo *2*."
+   },
+   {
+    "id": "resumen",
+    "nombre": "Resumen",
+    "mensajes": [
+     {
+      "tipo": "texto",
+      "texto": "*Tu pedido*\n• {categoria}\n• {cantidad} unidades\n\n¿Lo confirmamos?"
+     }
+    ],
+    "salidas": [
+     {
+      "id": "a0203903-cfe4-4f1b-8c47-4781cadfcfd7",
+      "texto": "Confirmar",
+      "disparadores": "confirmo, dale, si, ok",
+      "destino": "confirmado"
+     },
+     {
+      "id": "db77059a-19b8-4dcd-8a39-c6887610e265",
+      "texto": "Cambiar cantidad",
+      "disparadores": "cambiar, otra cantidad",
+      "destino": "cantidad"
+     }
+    ],
+    "formatoOpciones": "lista",
+    "pos": {
+     "x": 960,
+     "y": 160
+    }
+   },
+   {
+    "id": "confirmado",
+    "nombre": "Pedido confirmado",
+    "mensajes": [
+     {
+      "tipo": "texto",
+      "texto": "¡Listo {nombre}! Anotamos tu pedido y te escribimos en el día para coordinar la entrega."
+     }
+    ],
+    "salidas": [
+     {
+      "id": "e69313d8-140b-4d5e-9f11-9c54487a4757",
+      "texto": "",
+      "disparadores": "",
+      "destino": "accion-pedido",
+      "tiempo": true
+     }
+    ],
+    "formatoOpciones": "lista",
+    "pos": {
+     "x": 1280,
+     "y": 160
+    },
+    "timed": true,
+    "espera": 1
+   },
+   {
+    "id": "accion-pedido",
+    "tipo": "accion",
+    "nombre": "Anotar pedido",
+    "pos": {
+     "x": 1600,
+     "y": 160
+    },
+    "accion": {
+     "id": "a6bf8352-332a-4a1b-83da-9dcc2b7687f6",
+     "tipo": "sheets",
+     "planilla": "",
+     "modo": "agregar",
+     "columnas": [
+      {
+       "columna": "A",
+       "valor": "{fecha}"
+      },
+      {
+       "columna": "B",
+       "valor": "{hora}"
+      },
+      {
+       "columna": "C",
+       "valor": "{nombre}"
+      },
+      {
+       "columna": "D",
+       "valor": "{telefono}"
+      },
+      {
+       "columna": "E",
+       "valor": "{categoria}"
+      },
+      {
+       "columna": "F",
+       "valor": "{cantidad}"
+      },
+      {
+       "columna": "G",
+       "valor": "Nuevo"
+      }
+     ],
+     "buscarColumna": "",
+     "buscarValor": "",
+     "crear": true
+    },
+    "salidas": [
+     {
+      "id": "c5e1a7d2-6b0f-4a8e-9d3c-2f7b1e4a9c01",
+      "texto": "",
+      "disparadores": "",
+      "destino": "accion-dueno",
+      "tiempo": true
+     }
+    ]
+   },
+   {
+    "id": "foto",
+    "nombre": "Consulta por foto",
+    "mensajes": [
+     {
+      "tipo": "texto",
+      "texto": "Mandame una foto del producto que buscás y te digo si lo tenemos"
+     }
+    ],
+    "salidas": [
+     {
+      "id": "ddeeadd6-335b-4e18-80e5-791b0eeb81f8",
+      "texto": "",
+      "disparadores": "",
+      "destino": "foto-ok",
+      "numero": true
+     }
+    ],
+    "formatoOpciones": "lista",
+    "pos": {
+     "x": 320,
+     "y": 350
+    },
+    "guardarEn": "foto",
+    "numerico": "imagen",
+    "msgNumero": "Para seguir necesito una foto del producto."
+   },
+   {
+    "id": "foto-ok",
+    "nombre": "Foto recibida",
+    "mensajes": [
+     {
+      "tipo": "texto",
+      "texto": "¡Gracias! Lo revisamos y te respondemos por acá en un rato."
+     }
+    ],
+    "salidas": [
+     {
+      "id": "8cb50c9c-0868-4f5e-a52e-96f5b57969c8",
+      "texto": "",
+      "disparadores": "",
+      "destino": "accion-foto",
+      "tiempo": true
+     }
+    ],
+    "formatoOpciones": "lista",
+    "pos": {
+     "x": 640,
+     "y": 350
+    },
+    "timed": true,
+    "espera": 1
+   },
+   {
+    "id": "accion-foto",
+    "tipo": "accion",
+    "nombre": "Avisar por mail",
+    "pos": {
+     "x": 960,
+     "y": 350
+    },
+    "accion": {
+     "id": "91aa195e-5f8c-449d-b026-c706df38d744",
+     "tipo": "mail",
+     "para": "",
+     "asunto": "Consulta por foto de {nombre}",
+     "cuerpo": "{nombre} (+{telefono}) pregunta si tenemos este producto:\n\n{foto}"
+    },
+    "salidas": [
+     {
+      "id": "4b9d2e6f-1a3c-4f7e-8b5d-9c0e2a6f3b12",
+      "texto": "",
+      "disparadores": "",
+      "destino": "accion-dueno",
+      "tiempo": true
+     }
+    ]
+   },
+   {
+    "id": "ubicacion",
+    "nombre": "Horarios y ubicación",
+    "mensajes": [
+     {
+      "tipo": "texto",
+      "texto": "*Horarios*\nLunes a sábados de 10 a 19 hs\n\nEstamos acá:"
+     },
+     {
+      "tipo": "ubicacion",
+      "nombre": "Bazar La Casona",
+      "direccion": "Av. Cabildo 2150, CABA",
+      "lat": -34.5611,
+      "lng": -58.4567
+     },
+     {
+      "tipo": "texto",
+      "texto": "¿Preferís hablar con alguien? Escribile a Sofi:"
+     },
+     {
+      "tipo": "contacto",
+      "nombre": "Sofi · La Casona",
+      "telefono": "+5491155550142"
+     }
+    ],
+    "salidas": [],
+    "formatoOpciones": "lista",
+    "pos": {
+     "x": 320,
+     "y": 520
+    }
+   },
+   {
+    "id": "accion-dueno",
+    "tipo": "accion",
+    "nombre": "Avisar al dueño",
+    "pos": {
+     "x": 1920,
+     "y": 350
+    },
+    "accion": {
+     "id": "e2a4c6f8-3b5d-4e7f-9a1c-6d8f0b2e4a73",
+     "tipo": "whatsapp",
+     "numero": "",
+     "texto": "*Aviso de {nombre}* (+{telefono})\nPedido: {cantidad} x {categoria}\nConsulta por foto: {foto}"
+    }
+   }
+  ]
+ }
+}

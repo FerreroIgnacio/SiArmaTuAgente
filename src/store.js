@@ -1,27 +1,18 @@
-import { mkdirSync } from 'node:fs';
-import { readFile, readdir, rm, writeFile } from 'node:fs/promises';
-import { randomUUID } from 'node:crypto';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { env } from 'cloudflare:workers';
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-export const DATA_DIR = process.env.DATA_DIR || path.join(ROOT, 'data');
-const BOTS_DIR = path.join(DATA_DIR, 'bots');
-export const AUTH_DIR = path.join(DATA_DIR, 'auth');
-export const ARCHIVOS_DIR = path.join(DATA_DIR, 'archivos');
-export const METRICAS_DIR = path.join(DATA_DIR, 'metricas');
-
-// Sincrónico (sin await de nivel superior) para poder empaquetar el ejecutable local
-for (const d of [BOTS_DIR, AUTH_DIR, ARCHIVOS_DIR, METRICAS_DIR]) mkdirSync(d, { recursive: true });
+// Todo lo que guarda el servidor vive en D1 (ver schema.sql): agentes, charlas en curso, métricas, cuentas de Google
+// y versiones de sesión. Los archivos no: están en el Drive del dueño.
+export const db = () => env.DB;
 
 // flujo: { nodos: [estado] }, el estado 'inicio' es donde arranca la charla. Es una máquina de estados.
 // estado: { id, nombre, mensajes: [mensaje], salidas: [salida], formatoOpciones, pregunta (de la encuesta), pos }
 //   formatoOpciones 'lista' (numeradas) | 'encuesta' (de WhatsApp) | 'ninguno' (solo escucha)
 //   guardarEn: nombre de variable → lo que conteste el cliente en este estado se guarda como {variable}
 // salida: { id, texto, disparadores, destino } → una respuesta que escucha el estado y a qué estado lleva
-//   { id, cualquiera: true, destino } → si lo que escribe no coincide con ninguna, sigue por acá
-//   { id, numero: true, destino } → en un estado con numerico ('entero' | 'decimal') es la única que escucha;
-//     si no manda un número válido se le contesta msgNumero y la charla se queda en el estado
+//   { id, numero: true, destino } → en un estado con numerico ('entero' | 'decimal') es por donde sigue un número válido;
+//     si no manda un número ni una de las otras respuestas se le contesta msgNumero y la charla se queda en el estado.
+//     Con numerico 'imagen' | 'documento' | 'audio' | 'video' | 'archivo' el estado pide un archivo de ese tipo
+//     (guardarEn recibe su URL)
 // nodo de acción (terminal): { id, tipo: 'accion', nombre, accion, pos } → hace una sola acción (ver acciones.js)
 // nodo de salto (terminal): { id, tipo: 'salto', nombre, objetivo, pos } → la charla sigue en el estado llamado `objetivo`
 // mensaje: { tipo, ...contenido }
@@ -39,11 +30,12 @@ export function botVacio() {
     agente: {
       nombre: 'Agente de <tu nombre>',
       fallback: 'Perdón, no te entendí. ¿Me lo escribís de otra forma?',
+      despedida: 'Gracias por escribirnos. ¡Hasta la próxima!',
       usarLLM: false,
     },
     flujo: { nodos: [{ id: 'inicio', nombre: 'Inicio', mensajes: [{ tipo: 'texto', texto: BIENVENIDA }], salidas: [], formatoOpciones: 'lista' }] },
     reglas: { ignorarGrupos: true },
-    conexion: { proveedor: 'baileys', meta: { phoneNumberId: '', accessToken: '', verifyToken: '' } },
+    conexion: { proveedor: 'baileys', meta: { phoneNumberId: '', accessToken: '', appSecret: '', verifyToken: '' } },
   };
 }
 
@@ -76,7 +68,7 @@ function aSalidas(nodos) {
     if (Array.isArray(n.salidas) || n.tipo === 'accion' || n.tipo === 'salto') return n;
     const { hijos = [], titulo, disparadores, ...resto } = n;
     const salidas = hijos.filter(id => mapa.has(id)).map(id => ({
-      id: randomUUID(), texto: mapa.get(id).titulo || '', disparadores: mapa.get(id).disparadores || '', destino: id,
+      id: crypto.randomUUID(), texto: mapa.get(id).titulo || '', disparadores: mapa.get(id).disparadores || '', destino: id,
     }));
     return { ...resto, nombre: titulo || '', salidas, formatoOpciones: n.formatoOpciones || 'lista' };
   });
@@ -107,12 +99,12 @@ function migrar(bot) {
   if (!bot.flujo && !bot.arbol) {
     let respuestas = bot.respuestas;
     if (!Array.isArray(respuestas)) {
-      respuestas = (bot.agente.faqs || []).map(f => ({ id: randomUUID(), titulo: f.p, disparadores: f.p, tipo: 'texto', texto: f.r }));
+      respuestas = (bot.agente.faqs || []).map(f => ({ id: crypto.randomUUID(), titulo: f.p, disparadores: f.p, tipo: 'texto', texto: f.r }));
     }
     const porId = Object.fromEntries(respuestas.map(r => [r.id, r]));
     const aNodo = (r, titulo, vistos) => {
       const { opciones, ...resto } = r;
-      const nodo = { ...resto, id: randomUUID(), titulo: titulo || r.titulo, tipo: r.tipo === 'menu' ? 'texto' : r.tipo, hijos: [] };
+      const nodo = { ...resto, id: crypto.randomUUID(), titulo: titulo || r.titulo, tipo: r.tipo === 'menu' ? 'texto' : r.tipo, hijos: [] };
       if (r.tipo === 'menu' && !vistos.has(r.id)) {
         for (const o of opciones || []) {
           if (porId[o.destino]) nodo.hijos.push(aNodo(porId[o.destino], o.etiqueta, new Set([...vistos, r.id])));
@@ -133,6 +125,8 @@ function migrar(bot) {
   if (!bot.flujo) bot.flujo = arbolAFlujo(bot.arbol);
   delete bot.arbol;
   bot.flujo.nodos = separarAcciones(aSalidas(bot.flujo.nodos.map(aEstado)));
+  // Ya no existe la salida "Cualquier respuesta"
+  for (const n of bot.flujo.nodos) if (n.salidas) n.salidas = n.salidas.filter(s => !s.cualquiera);
   for (const k of ['faqs', 'tono', 'instrucciones', 'bienvenida', 'bienvenidaRespuesta']) delete bot.agente[k];
   delete bot.respuestas;
   return bot;
@@ -158,28 +152,28 @@ export function aplanar(flujo) {
   return out;
 }
 
-const archivo = id => path.join(BOTS_DIR, `${id.replace(/[^a-zA-Z0-9-]/g, '')}.json`);
-
 export async function getBot(id) {
-  try {
-    const bot = JSON.parse(await readFile(archivo(id), 'utf8'));
-    if (bot.flujo) return migrar(bot);
-    // La migración genera ids nuevos: guardarla para que sean estables
-    await writeFile(archivo(id), JSON.stringify(migrar(bot), null, 2));
-    return bot;
-  } catch {
-    return null;
-  }
+  const fila = await db().prepare('SELECT datos FROM bots WHERE id = ?').bind(String(id)).first();
+  if (!fila) return null;
+  const bot = JSON.parse(fila.datos);
+  if (bot.flujo) return migrar(bot);
+  // La migración genera ids nuevos: guardarla para que sean estables
+  await guardar(migrar(bot));
+  return bot;
 }
 
-export async function listBots() {
-  const files = (await readdir(BOTS_DIR)).filter(f => f.endsWith('.json'));
-  return Promise.all(files.map(f => getBot(f.slice(0, -5))));
+// Agentes de una cuenta, del más viejo al más nuevo
+export async function botsDe(sub) {
+  const { results } = await db().prepare('SELECT datos FROM bots WHERE dueno = ?').bind(String(sub)).all();
+  return results.map(f => migrar(JSON.parse(f.datos))).sort((a, b) => a.creado.localeCompare(b.creado));
 }
+
+const guardar = bot => db().prepare('INSERT INTO bots (id, dueno, datos) VALUES (?1, ?2, ?3) ON CONFLICT(id) DO UPDATE SET datos = ?3')
+  .bind(bot.id, bot.dueno, JSON.stringify(bot)).run();
 
 // Mezcla por sección para que un PUT parcial no borre el resto
 export async function saveBot(id, datos, dueno) {
-  const base = (id && (await getBot(id))) || { ...botVacio(), id: randomUUID(), dueno: dueno?.sub, creado: new Date().toISOString() };
+  const base = (id && (await getBot(id))) || { ...botVacio(), id: crypto.randomUUID(), dueno: dueno?.sub, creado: new Date().toISOString() };
   // El mail del dueño se usa como "responder a" en los mails de las acciones
   if (dueno?.email) base.duenoEmail = dueno.email;
   const bot = { ...base };
@@ -189,31 +183,22 @@ export async function saveBot(id, datos, dueno) {
   if (datos.conexion?.meta) bot.conexion.meta = { ...base.conexion.meta, ...datos.conexion.meta };
   if (Array.isArray(datos.flujo?.nodos) && datos.flujo.nodos.some(n => n.id === 'inicio')) bot.flujo = { nodos: datos.flujo.nodos };
   bot.actualizado = new Date().toISOString();
-  await writeFile(archivo(bot.id), JSON.stringify(bot, null, 2));
+  await guardar(bot);
   return bot;
 }
 
-// Borra el agente y todo lo suyo: configuración, sesión de WhatsApp, archivos subidos y métricas
+// Borra el agente y todo lo suyo: configuración, charlas y métricas (los archivos están en el Drive del dueño)
 export async function borrarBot(id) {
-  const limpio = id.replace(/[^a-zA-Z0-9-]/g, '');
-  await Promise.all([
-    rm(archivo(limpio), { force: true }),
-    rm(path.join(AUTH_DIR, limpio), { recursive: true, force: true }),
-    rm(path.join(ARCHIVOS_DIR, limpio), { recursive: true, force: true }),
-    rm(path.join(METRICAS_DIR, `${limpio}.json`), { force: true }),
+  await db().batch([
+    db().prepare('DELETE FROM bots WHERE id = ?').bind(id),
+    db().prepare('DELETE FROM metricas WHERE bot = ?').bind(id),
+    db().prepare('DELETE FROM charlas WHERE clave LIKE ?').bind(`${id}:%`),
   ]);
 }
 
-// Lo que se manda al navegador: sin el token de Meta
+// Lo que se manda al navegador: sin los secretos de Meta
 export function botPublico(bot) {
-  const meta = { ...bot.conexion.meta, accessToken: bot.conexion.meta?.accessToken ? '••••••••' : '' };
+  const m = bot.conexion.meta || {};
+  const meta = { ...m, accessToken: m.accessToken ? '••••••••' : '', appSecret: m.appSecret ? '••••••••' : '' };
   return { ...bot, conexion: { ...bot.conexion, meta } };
-}
-
-// URLs '/archivos/...' son archivos subidos desde la herramienta: se mandan desde disco
-export function resolverArchivo(url) {
-  if (!url?.startsWith('/archivos/')) return url;
-  const destino = path.resolve(ARCHIVOS_DIR, decodeURIComponent(url.slice('/archivos/'.length)));
-  if (!destino.startsWith(ARCHIVOS_DIR + path.sep)) throw new Error('Ruta de archivo inválida');
-  return destino;
 }

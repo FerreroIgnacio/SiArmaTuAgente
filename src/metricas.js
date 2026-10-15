@@ -1,30 +1,18 @@
-import { readFile, writeFile } from 'node:fs/promises';
-import path from 'node:path';
-import { METRICAS_DIR, aplanar } from './store.js';
+import { aplanar, db } from './store.js';
 
-// Una ficha JSON por bot. Solo cuenta mensajes reales de WhatsApp, no los de la vista previa.
-const cache = new Map();
-const pendientes = new Map();
-
-const archivo = id => path.join(METRICAS_DIR, `${id.replace(/[^a-zA-Z0-9-]/g, '')}.json`);
+// Una ficha JSON por bot en D1. Solo cuenta mensajes reales de WhatsApp, no los de la vista previa.
 const vacio = () => ({ recibidos: 0, enviados: 0, msTotal: 0, porFuente: {}, porRespuesta: {}, porDia: {}, chats: {} });
 
 async function cargar(botId) {
-  if (!cache.has(botId)) {
-    const m = await readFile(archivo(botId), 'utf8').then(JSON.parse).catch(vacio);
-    cache.set(botId, m);
-  }
-  return cache.get(botId);
+  const fila = await db().prepare('SELECT datos FROM metricas WHERE bot = ?').bind(botId).first();
+  return fila ? JSON.parse(fila.datos) : vacio();
 }
 
-function persistir(botId) {
-  clearTimeout(pendientes.get(botId));
-  pendientes.set(botId, setTimeout(() => {
-    writeFile(archivo(botId), JSON.stringify(cache.get(botId))).catch(err => console.error('[metricas]', err.message));
-  }, 1000));
-}
+const persistir = (botId, m) => db().prepare('INSERT INTO metricas (bot, datos) VALUES (?1, ?2) ON CONFLICT(bot) DO UPDATE SET datos = ?2')
+  .bind(botId, JSON.stringify(m)).run();
 
-const dia = (ts = Date.now()) => new Date(ts - new Date(ts).getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+// Día en hora argentina (el Worker corre en UTC)
+const dia = (ts = Date.now()) => new Date(ts).toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' });
 
 export async function registrar(botId, { chatId, fuente, respuestaId, enviados, ms }) {
   const m = await cargar(botId);
@@ -37,7 +25,7 @@ export async function registrar(botId, { chatId, fuente, respuestaId, enviados, 
   m.chats[chatId] = Date.now();
   d.recibidos++;
   if (!d.chats.includes(chatId)) d.chats.push(chatId);
-  persistir(botId);
+  await persistir(botId, m);
 }
 
 export const charlasHoy = async botId => (await cargar(botId)).porDia[dia()]?.chats.length || 0;

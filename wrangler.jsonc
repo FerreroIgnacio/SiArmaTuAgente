@@ -1,0 +1,25 @@
+{
+  "name": "si-arma-tu-agente",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "dev": { "port": 3210 },
+  "assets": {
+    "directory": "public",
+    "binding": "ASSETS",
+    // Lo demás (app.js, estilos, login, wa-worker.js…) lo sirve Assets directo, con los headers de public/_headers
+    "run_worker_first": ["/", "/index.html", "/api/*", "/auth/*", "/webhooks/*", "/ayuda/variables", "/ayuda/api-meta"]
+  },
+  "routes": [{ "pattern": "armatuagente.sisoftwaresolutions.com", "custom_domain": true }],
+  "d1_databases": [{ "binding": "DB", "database_name": "siarma", "database_id": "c1d63def-d3d7-464f-b544-963fac2fb309" }],
+  "send_email": [{ "name": "EMAIL" }],
+  // Cada minuto: avances automáticos y despedidas de la API de Meta (meta.js) y limpieza de charlas vencidas
+  "triggers": { "crons": ["* * * * *"] },
+  "observability": { "enabled": true },
+  "vars": {
+    "BASE_URL": "https://armatuagente.sisoftwaresolutions.com",
+    "MAIL_FROM": "Si · Armá tu agente <avisos@agentes.sisoftwaresolutions.com>"
+  }
+  // Secrets (npx wrangler secret put …): GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, SESSION_SECRET, CLAVE_TOKENS
+  // En local van en .dev.vars (con BASE_URL=http://localhost:3210)
+}

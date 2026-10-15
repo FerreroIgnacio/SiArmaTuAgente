@@ -1,0 +1,10 @@
+# Headers de los estáticos que sirve Cloudflare. Mantener igual que el middleware de src/server.js
+/*
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob: https:; media-src 'self' data: blob: https:; connect-src 'self' https: wss://*.whatsapp.com; worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
+
+# El worker de WhatsApp (protobuf de Baileys) necesita eval
+/*.js
+  ! Content-Security-Policy

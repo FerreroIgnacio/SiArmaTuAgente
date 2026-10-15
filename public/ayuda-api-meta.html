@@ -9,89 +9,105 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/styles.css">
-<style>
-  .legal{max-width:760px;margin:0 auto;padding:40px 16px 64px;line-height:1.6;}
-  .legal header{display:flex;align-items:center;gap:10px;margin-bottom:28px;}
-  .legal header .mark{width:32px;height:32px;color:var(--accent);}
-  .legal header a{display:flex;align-items:center;gap:10px;color:var(--ink);text-decoration:none;font:600 16px var(--font-head);}
-  .legal h1{font:600 28px/1.2 var(--font-head);margin-bottom:6px;}
-  .legal h2{font:600 18px var(--font-head);margin:28px 0 8px;}
-  .legal p,.legal li{color:#3d3631;}
-  .legal ul{padding-left:20px;display:grid;gap:4px;}
-  .legal .fecha{color:var(--muted);font-size:13px;}
-  .legal img{display:block;max-width:100%;border:1px solid #e6dfd8;border-radius:10px;margin:12px 0;}
-  .legal img.angosta{max-width:360px;}
-  .legal a{color:var(--accent-dark);}
-</style>
 </head>
 <body>
-<main class="legal">
-  <header>
-    <a href="/">
-      <svg class="mark" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-        <circle cx="50" cy="50" r="46" stroke="currentColor" stroke-width="5"/>
-        <text x="50" y="66" text-anchor="middle" font-family="Arial, sans-serif" font-weight="800" font-size="48" fill="currentColor">Si</text>
-      </svg>
-      Si Arma Tu Agente
-    </a>
-  </header>
+<header class="articulo-top">
+  <span class="brand">
+    <a class="brand-si brand-empresa" href="https://sisoftwaresolutions.com" target="_blank" rel="noopener" aria-label="Si soluciones en software"><svg class="mark" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <circle cx="50" cy="50" r="46" stroke="currentColor" stroke-width="5"/>
+      <text x="50" y="66" text-anchor="middle" font-family="Arial, sans-serif" font-weight="800" font-size="48" fill="currentColor">Si</text>
+    </svg><span>Si soluciones en software</span></a>
+    <span class="brand-sep">/</span>
+    <a class="brand-si" href="/">Arma tu agente</a>
+    <span class="brand-sep">/</span>
+    <a class="brand-si brand-actual" href="" aria-current="page"><span>API de Meta</span></a>
+  </span>
+</header>
+<main class="articulo">
+  <a class="volver" href="/"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>Volver</a>
 
   <h1>Cómo conseguir tu API de Meta (WhatsApp Business)</h1>
-  <p class="fecha">Para atender clientes reales con tu agente, sin vincular un número por QR.</p>
+  <p class="bajada">Para atender clientes reales con tu agente, sin vincular un número por QR.</p>
 
+  <section>
   <h2>Antes de empezar</h2>
+  <p>Al terminar vas a tener los cuatro datos que pide la pestaña de conexión:</p>
+  <div class="resumen">
+    <div><b>Phone number ID</b>Identifica tu número en Meta (paso 2).</div>
+    <div><b>Access token</b>La llave para mandar mensajes (paso 3).</div>
+    <div><b>App secret</b>Para comprobar que los mensajes vienen de Meta (paso 4).</div>
+    <div><b>Verify token</b>Un texto que inventás vos (paso 4).</div>
+  </div>
+  <p>Vas a necesitar:</p>
   <ul>
     <li>Una cuenta personal de Facebook.</li>
     <li>Un número de teléfono que <b>no esté registrado en WhatsApp ni en WhatsApp Business</b> (o que puedas desvincular). Tiene que poder recibir un SMS o llamada para verificarlo.</li>
     <li>Idealmente, los datos de tu negocio (nombre legal, sitio web) para verificarlo con Meta.</li>
   </ul>
+  </section>
 
-  <h2>1. Crear la app</h2>
+  <section id="paso1">
+  <h2><span class="num">1</span>Crear la app</h2>
   <ul>
     <li>Entrá a <a href="https://developers.facebook.com/apps" target="_blank" rel="noopener">developers.facebook.com/apps</a> e iniciá sesión.</li>
     <li>Tocá <b>Crear app</b> y elegí el caso de uso <b>Conectarte con clientes en WhatsApp</b> (tipo de app <b>Business</b>).</li>
     <li>Asociala a un <b>portfolio comercial</b> (Meta Business). Si no tenés, te deja crear uno en el momento.</li>
   </ul>
+  </section>
 
-  <h2>2. Agregar WhatsApp y encontrar el Phone number ID</h2>
+  <section id="paso2">
+  <h2><span class="num">2</span>Agregar WhatsApp y encontrar el Phone number ID</h2>
   <ul>
     <li>Dentro de la app, abrí <b>WhatsApp</b> → <b>Configuración de la API</b>.</li>
     <li>Meta te da un número de prueba gratuito. Ahí vas a ver el <b>Phone number ID</b> y el <b>WhatsApp Business Account ID</b>.</li>
     <li>Copiá el <b>Phone number ID</b> y pegalo en el campo del mismo nombre en la pestaña de conexión de Si Arma Tu Agente.</li>
   </ul>
+  </section>
 
-  <h2>3. Conseguir un token que no venza</h2>
+  <section id="paso3">
+  <h2><span class="num">3</span>Conseguir un token que no venza</h2>
   <p>El token que aparece en esa pantalla dura solo 24 horas. Para uno permanente:</p>
   <ul>
     <li>Entrá a <a href="https://business.facebook.com/settings" target="_blank" rel="noopener">Configuración del negocio</a> → <b>Usuarios</b> → <b>Usuarios del sistema</b>.</li>
     <li>Creá un usuario del sistema con rol <b>Administrador</b>.</li>
     <li>Asignale tu app con control total, y tocá <b>Generar token</b>.</li>
     <li>Marcá los permisos <code>whatsapp_business_messaging</code> y <code>whatsapp_business_management</code>, y elegí vencimiento <b>Nunca</b>.</li>
-    <li>Copiá el token y pegalo en <b>Access token</b>. Guardalo bien: Meta no lo vuelve a mostrar.</li>
+    <li>Copiá el token y pegalo en <b>Access token</b>.</li>
   </ul>
+  <p class="nota"><b>Ojo:</b> Meta muestra el token una sola vez. Guardalo en un lugar seguro y no lo compartas: con él se puede mandar mensajes desde tu número.</p>
+  </section>
 
-  <h2>4. Conectar el webhook</h2>
+  <section id="paso4">
+  <h2><span class="num">4</span>Conectar el webhook</h2>
   <ul>
+    <li>En Meta, abrí <b>Configuración de la app</b> → <b>Básica</b>, tocá <b>Mostrar</b> en <b>Clave secreta de la app</b> y pegala en <b>App secret</b>.</li>
     <li>En Si Arma Tu Agente, elegí el proveedor <b>Meta</b>. Inventá un <b>Verify token</b> (cualquier texto) y copiá la URL del campo <b>Webhook</b>.</li>
     <li>En Meta: <b>WhatsApp</b> → <b>Configuración</b> → <b>Webhook</b> → <b>Editar</b>. Pegá la URL y el Verify token, y tocá <b>Verificar y guardar</b>.</li>
     <li>Suscribite al campo <b>messages</b>.</li>
-    <li>La URL tiene que ser pública y con HTTPS. Si estás en tu compu, usá un túnel como ngrok o Cloudflare Tunnel.</li>
+    <li>Volvé a Si Arma Tu Agente y tocá <b>Conectar</b>: se validan los datos con Meta y el agente empieza a responder, aunque cierres la página.</li>
   </ul>
+  </section>
 
-  <h2>5. Pasar a tu número real</h2>
+  <section id="paso5">
+  <h2><span class="num">5</span>Pasar a tu número real</h2>
   <ul>
     <li>En <b>Configuración de la API</b> → <b>Agregar número de teléfono</b>, cargá el de tu negocio y verificalo con el código que te llega.</li>
     <li>Cambiá el Phone number ID en Si Arma Tu Agente por el del número nuevo.</li>
     <li>Para escribirle a cualquier persona (no solo a números de prueba) y subir el límite de mensajes, completá la <b>verificación del negocio</b> en Configuración del negocio → Centro de seguridad.</li>
     <li>Pasá la app a modo <b>Activo</b> (Live) desde el panel de la app.</li>
   </ul>
+  </section>
 
+  <section id="saber">
   <h2>Cosas que conviene saber</h2>
   <ul>
     <li>Podés responderle gratis a un cliente durante las 24 horas posteriores a su último mensaje. Para escribirle primero o pasado ese plazo, Meta exige plantillas aprobadas y las cobra.</li>
     <li>Con la API, ese número deja de funcionar en la app de WhatsApp del celular.</li>
+    <li>Mientras la app esté en modo desarrollo, solo podés escribirles a los números de prueba que agregues en <b>Configuración de la API</b> (hasta 5).</li>
     <li>Los pasos y nombres de menús de Meta cambian seguido. Si algo no coincide, buscá el equivalente en la <a href="https://developers.facebook.com/docs/whatsapp/cloud-api/get-started" target="_blank" rel="noopener">documentación oficial</a>.</li>
   </ul>
+  </section>
 </main>
+<script src="/ayuda.js"></script>
 </body>
 </html>

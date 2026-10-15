@@ -1,3 +1,6 @@
+import { crearWhatsApp } from './whatsapp.js';
+import { mostrarEn, subirADrive } from './drive.js';
+
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
 const form = $('#form');
@@ -6,7 +9,7 @@ let botId = null;
 let bots = [];
 let timerGuardado = null;
 let guardando = Promise.resolve();
-let eventos = null;
+let wa = null; // WhatsApp personal corriendo en esta pestaña (ver whatsapp.js)
 let sesionPrueba = nuevaSesion();
 let estadoPrueba = null; // estado donde está la charla de prueba, se resalta en el lienzo
 
@@ -70,7 +73,6 @@ function llenarForm(bot) {
   }
   $('#webhookUrl').value = `${location.origin}/webhooks/meta/${bot.id}`;
   refrescarDerivados();
-  revisarLLM();
 }
 
 /* ---------- Autoguardado ---------- */
@@ -88,8 +90,18 @@ function guardar() {
   const id = botId, datos = leerForm();
   guardando = guardando.then(async () => {
     try {
-      await api('PUT', `/api/bots/${id}`, datos);
-      if (id === botId) $('#saved').textContent = 'Guardado';
+      const res = await api('PUT', `/api/bots/${id}`, datos);
+      const prov = datos.conexion?.proveedor;
+      if (id === botId) {
+        $('#saved').textContent = 'Guardado';
+        // Al volver a WhatsApp personal se reconecta como al abrir el agente (retoma la sesión o muestra el QR)
+        const volvio = !wa && prov === 'baileys';
+        prepararWhatsApp(prov);
+        if (volvio) wa.conectar();
+        // Con la API de Meta, cambiar los datos corta la conexión: el estado lo dice el servidor
+        if (prov === 'meta') pintarEstado(res.estado);
+        if (prov !== proveedorActual) escucharEventos(prov);
+      }
       const b = bots.find(b => b.id === id);
       if (b) { b.nombre = datos.agente.nombre; }
     } catch (err) {
@@ -101,10 +113,17 @@ function guardar() {
 
 const guardarPendiente = () => (timerGuardado ? guardar() : guardando);
 
+// Las guías de ayuda se abren en la misma pestaña: antes de salir se guarda lo pendiente
+document.addEventListener('click', e => {
+  const a = e.target.closest('a[href^="/ayuda/"]');
+  if (!a || e.ctrlKey || e.metaKey || e.shiftKey || e.button) return;
+  e.preventDefault();
+  guardarPendiente().finally(() => (location.href = a.href));
+});
+
 form.addEventListener('input', e => { if (e.target.name) cambio(); });
 form.addEventListener('change', e => {
   if (e.target.name && (e.target.type === 'radio' || e.target.type === 'checkbox' || e.target.tagName === 'SELECT')) cambio();
-  if (e.target.name === 'agente.usarLLM') revisarLLM();
 });
 form.addEventListener('submit', e => e.preventDefault());
 
@@ -114,36 +133,19 @@ function refrescarDerivados() {
   const prov = form.querySelector('[name="conexion.proveedor"]:checked')?.value;
   $('#metaFields').hidden = prov !== 'meta';
   $('#provHelp').replaceChildren(
-    prov === 'baileys' ? 'Se vincula como WhatsApp Web escaneando un QR. Usa el número que ya tenés. ' : '',
-    'Solo para probar, para no violar los términos y condiciones de WhatsApp. Para tráfico real necesitás una API de Meta, ',
-    el('a', { href: URL_GUIA_META, target: '_blank', rel: 'noopener' }, 'Como conseguir una api de meta'), '.');
+    ...(prov === 'meta'
+      ? ['Responde desde nuestros servidores, aunque cierres esta página. Cargá los datos, configurá el webhook en Meta y tocá Conectar. ',
+        el('a', { href: URL_GUIA_META }, 'Cómo conseguir una API de Meta'), '.']
+      : ['Se vincula como WhatsApp Web escaneando un QR. Usa el número que ya tenés. ',
+        'Solo para probar, para no violar los términos y condiciones de WhatsApp. Para tráfico real necesitás una API de Meta, ',
+        el('a', { href: URL_GUIA_META }, 'Como conseguir una api de meta'), '.']));
 
   const nombre = form.elements['agente.nombre'].value.trim() || 'Asistente';
   $('#tName').textContent = nombre;
   $('#tAvatar').textContent = nombre[0].toUpperCase();
 }
 
-async function revisarLLM() {
-  const p = $('#llmEstado');
-  // El LLM todavía no está disponible en el servidor: la opción queda deshabilitada y apagada
-  form.elements['agente.usarLLM'].checked = false;
-  if (!form.elements['agente.usarLLM'].checked) { p.hidden = true; return; }
-  p.hidden = false;
-  p.className = 'help indent llm-estado';
-  p.textContent = 'Revisando conexión…';
-  const s = await api('GET', '/api/llm').catch(err => ({ ok: false, detalle: err.message }));
-  p.classList.toggle('ok', !!s.ok);
-  p.textContent = s.ok ? `Conectado a ${s.url} · modelo ${s.modelo}` : s.detalle;
-}
-
 /* ---------- Respuestas (grafo) ---------- */
-const TIPOS = {
-  texto: 'Texto',
-  imagen: 'Imagen',
-  documento: 'Documento',
-  ubicacion: 'Ubicación',
-  contacto: 'Contacto',
-};
 
 // Máquina de estados: cada nodo es un estado que manda sus mensajes y escucha respuestas.
 // Cada salida { id, texto, disparadores, destino } es una respuesta que escucha y el estado al que lleva.
@@ -156,7 +158,7 @@ const seleccionados = () => nodos.filter(n => enSeleccion(n.id));
 const barraEn = () => (ultimo && enSeleccion(ultimo) ? ultimo : seleccionado);
 
 const nodo = id => nodos.find(n => n.id === id);
-const destinosDe = n => [...new Set((n.salidas || []).filter(s => !s.tiempo || n.timed).map(s => nodo(s.destino)).filter(Boolean))];
+const destinosDe = n => [...new Set((n.salidas || []).filter(s => !s.tiempo || n.timed || n.tipo === 'accion').map(s => nodo(s.destino)).filter(Boolean))];
 const padresDe = n => nodos.filter(p => p.salidas?.some(s => s.destino === n.id));
 const nombreDe = n => n.id === 'inicio' ? 'Primer mensaje' : n.nombre || 'Sin nombre';
 
@@ -224,10 +226,7 @@ function subida(r, { accept, etiqueta }) {
     btn.disabled = true;
     btn.textContent = 'Subiendo…';
     try {
-      const res = await fetch(`/api/bots/${botId}/archivos`, { method: 'POST', headers: { 'x-nombre': encodeURIComponent(f.name) }, body: f });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
-      r.url = data.url;
+      r.url = (await subirADrive(f, f.name)).url;
       if (r.tipo === 'documento' && !r.nombreArchivo) r.nombreArchivo = f.name;
       editado();
       renderDetalle();
@@ -244,7 +243,7 @@ function contenido(r) {
     case 'imagen':
       return [
         el('label', {}, 'Imagen', subida(r, { accept: 'image/*', etiqueta: 'Subir imagen' })),
-        r.url ? el('img', { class: 'preview-img', src: r.url, alt: '' }) : null,
+        r.url ? mostrarEn(el('img', { class: 'preview-img', alt: '' }), r.url) : null,
         campo('Texto debajo de la imagen', r, 'texto', { tipo: 'textarea', rows: 2 }),
       ];
     case 'documento':
@@ -278,21 +277,24 @@ let ajustarAlMostrar = true;
 const snap = v => Math.round(v / GRID) * GRID;
 const terminal = n => n.tipo === 'accion' || n.tipo === 'salto';
 // Un estado cuyas salidas están todas desconectadas o sin texto no escucha: pasa solo por la que está conectada
-const escucha = s => !!(s.texto?.trim() || s.cualquiera || s.numero);
+const escucha = s => !!(s.texto?.trim() || s.numero);
 // Sin tiempo y sin respuestas que escuchen, pasa solo por la primera conectada (estados viejos)
 const pasaSola = n => (n.salidas || []).some(s => escucha(s) && nodo(s.destino)) ? null : (n.salidas || []).find(s => !s.tiempo && nodo(s.destino)) || null;
 // Salida por tiempo (output cero): sale siempre del puerto del encabezado; solo se usa si el estado es por tiempo
 const CERO = '__cero';
-const salidaCero = n => terminal(n) ? null : (n.salidas || []).find(s => s.tiempo) || null;
+// Una acción también la tiene: al terminar pasa enseguida al nodo conectado (acciones encadenadas)
+const salidaCero = n => n.tipo === 'salto' ? null : (n.salidas || []).find(s => s.tiempo) || null;
 // Estado final (ninguna salida conectada): tras la espera la charla se reinicia
-const autoFin = n => !terminal(n) && n.id !== 'inicio' && !n.guardarEn && !n.numerico && !(n.salidas || []).some(s => (!s.tiempo || n.timed) && nodo(s.destino));
+const autoFin = n => !terminal(n) && n.id !== 'inicio' && !n.guardarEn && !n.numerico && !(n.salidas || []).some(s => (n.timed || !s.tiempo && escucha(s)) && nodo(s.destino));
 const esperaDe = n => Math.max(0, Number(n.espera ?? 5) || 0);
 let espera = null; // { nodo, hasta, ms, destino, timer } mientras la charla de prueba espera para pasar sola
 // La salida de un estado que no escucha sale del puerto de la cabecera, no ocupa una fila
-// La de número (si el estado es numérico) va siempre primera: la tapa cubre las de abajo
-const filasDe = n => terminal(n) ? [] : (n.salidas || []).filter(s => !s.tiempo).sort((a, b) => !!b.numero - !!a.numero);
+// La de número (si el estado es numérico) va siempre última: la tapa cubre las de arriba
+const filasDe = n => terminal(n) ? [] : (n.salidas || []).filter(s => !s.tiempo).sort((a, b) => !!a.numero - !!b.numero);
 // Estado numérico (y no por tiempo, que tiene precedencia): solo escucha la salida de número
-const tapadaNum = (n, s) => !n.timed && n.numerico && !s.numero;
+// Lo que asegura un estado (n.numerico): un número, o un archivo que se le pide al cliente
+const TIPOS_RESPUESTA = { entero: 'Número entero', decimal: 'Número decimal', imagen: 'Imagen', documento: 'Documento', audio: 'Audio', video: 'Video', archivo: 'Cualquier archivo' };
+const pideArchivo = n => !!n.numerico && !['entero', 'decimal'].includes(n.numerico);
 const altoNodo = n => CAB_H + filasDe(n).length * SAL_H;
 
 // Ubica en columnas por profundidad; las hojas se apilan y el padre queda centrado en sus destinos.
@@ -371,16 +373,38 @@ function ajustar() {
   aplicarVista();
 }
 
-// Conector ortogonal con esquinas redondeadas, de un punto de salida a un punto de entrada
-function conector({ x: x1, y: y1 }, { x: x2, y: y2 }) {
-  if (x2 - x1 < 40) {
-    const d = Math.max(60, Math.abs(x2 - x1) / 2);
-    return `M${x1} ${y1} C${x1 + d} ${y1} ${x2 - d} ${y2} ${x2} ${y2}`;
+// Conector ortogonal con esquinas redondeadas, de un punto de salida a un punto de entrada.
+// Si el destino no está a la derecha, sale, rodea por un carril horizontal libre entre (o fuera de) las cajas y entra por la izquierda.
+const STUB = 20, RADIO = 10;
+function caja(n) {
+  const h = $(`.fnode[data-id="${n.id}"]`)?.offsetHeight || CAB_H + filasDe(n).length * SAL_H;
+  return { top: n.pos.y, bottom: n.pos.y + h, left: n.pos.x, right: n.pos.x + NODO_W };
+}
+function conector({ x: x1, y: y1 }, { x: x2, y: y2 }, ca, cb) {
+  if (x2 - x1 >= 2 * STUB) {
+    const mx = (x1 + x2) / 2;
+    return redondear([[x1, y1], [mx, y1], [mx, y2], [x2, y2]]);
   }
-  const mx = x1 + (x2 - x1) / 2;
-  const dy = y2 - y1, r = Math.min(10, Math.abs(dy) / 2), s = Math.sign(dy);
-  if (!r) return `M${x1} ${y1} H${x2}`;
-  return `M${x1} ${y1} H${mx - r} Q${mx} ${y1} ${mx} ${y1 + s * r} V${y2 - s * r} Q${mx} ${y2} ${mx + r} ${y2} H${x2}`;
+  let ly;
+  if (ca.bottom + 2 * STUB <= cb.top) ly = (ca.bottom + cb.top) / 2;
+  else if (cb.bottom + 2 * STUB <= ca.top) ly = (cb.bottom + ca.top) / 2;
+  else {
+    const abajo = Math.max(ca.bottom, cb.bottom) + STUB, arriba = Math.min(ca.top, cb.top) - STUB;
+    ly = Math.abs(abajo - y1) + Math.abs(abajo - y2) <= Math.abs(arriba - y1) + Math.abs(arriba - y2) ? abajo : arriba;
+  }
+  const xa = Math.max(x1, ca.right) + STUB, xb = Math.min(x2, cb.left) - STUB;
+  return redondear([[x1, y1], [xa, y1], [xa, ly], [xb, ly], [xb, y2], [x2, y2]]);
+}
+function redondear(pts) {
+  pts = pts.filter((p, i) => !i || p[0] !== pts[i - 1][0] || p[1] !== pts[i - 1][1]);
+  let d = `M${pts[0][0]} ${pts[0][1]}`;
+  for (let i = 1; i < pts.length - 1; i++) {
+    const [px, py] = pts[i - 1], [x, y] = pts[i], [nx, ny] = pts[i + 1];
+    const r = Math.min(RADIO, Math.hypot(x - px, y - py) / 2, Math.hypot(nx - x, ny - y) / 2);
+    d += ` L${x - Math.sign(x - px) * r} ${y - Math.sign(y - py) * r} Q${x} ${y} ${x + Math.sign(nx - x) * r} ${y + Math.sign(ny - y) * r}`;
+  }
+  const [lx, ly] = pts.at(-1);
+  return `${d} L${lx} ${ly}`;
 }
 
 const svg = (tag, attrs = {}) => {
@@ -392,19 +416,12 @@ const svg = (tag, attrs = {}) => {
 let animTiempo = null; // nodo recién tildado como por tiempo: su tapa, su ⏱ y sus líneas entran animados
 let saleTiempo = null; // nodo recién destildado: lo mismo sale animado antes de redibujarlo sin tiempo
 const animTapa = id => animTiempo === id ? ' entra' : saleTiempo === id ? ' sale' : '';
-let animNumero = null, saleNumero = null; // lo mismo para la tapa de un estado numérico
-const animNum = id => animNumero === id ? ' entra' : saleNumero === id ? ' sale' : '';
 
 // Tapa gris con un reloj sobre las salidas que un nodo por tiempo deja apagadas (desde la fila `desde`)
 function tapaReloj(desde, anim) {
   const ic = svg('svg', { viewBox: '0 0 24 24', width: 16, height: 16, fill: 'none', stroke: 'currentColor', 'stroke-width': 2, 'stroke-linecap': 'round' });
   ic.append(svg('circle', { cx: 12, cy: 14, r: 8 }), svg('path', { d: 'M12 14v-4M10 2h4M12 2v4M19 7l1.5-1.5' }));
   return el('div', { class: `tapa-reloj${anim}`, style: `top:${desde * 30}px` }, ic);
-}
-
-// Tapa con un # sobre las respuestas que un estado numérico deja apagadas (debajo de la de número)
-function tapaNumero(anim) {
-  return el('div', { class: `tapa-reloj num${anim}`, style: `top:${SAL_H}px`, title: 'Solo escucha un número' }, '#');
 }
 
 // Centro de un puerto en coordenadas del lienzo. Se mide en el DOM porque los estados tienen alto variable;
@@ -428,14 +445,14 @@ function dibujarConectores() {
     for (const s of n.salidas || []) {
       const h = nodo(s.destino);
       if (!h) continue;
-      const d = conector(puntoSalida(n, s), puntoEntrada(h));
+      const d = conector(puntoSalida(n, s), puntoEntrada(h), caja(n), caja(h));
       const g = svg('g', { 'data-padre': n.id, 'data-salida': s.id });
       const on = seleccionado && (n.id === seleccionado || h.id === seleccionado);
       // Nodo por tiempo: la primera salida es la que sigue (más viva), las demás quedan apagadas
-      // Sin texto (y sin pasar sola por ella) queda apagada con o sin tiempo: no se anima
-      const sinUso = !s.tiempo && !escucha(s) && pasaSola(n) !== s;
-      const tiempo = s.tiempo ? (n.timed ? ' vivo' + animTapa(n.id).replace(' ', ' cero-') : ' apagada') : n.timed ? ' off' + (sinUso ? '' : animTapa(n.id))
-        : tapadaNum(n, s) ? ' off' + (sinUso ? '' : animNum(n.id)) : sinUso ? ' apagada' : '';
+      // Sin texto queda apagada con o sin tiempo: no se anima
+      const sinUso = !s.tiempo && !escucha(s);
+      const tiempo = s.tiempo && n.tipo === 'accion' ? ' vivo' : s.tiempo ? (n.timed ? ' vivo' + animTapa(n.id).replace(' ', ' cero-') : ' apagada') : n.timed ? ' off' + (sinUso ? '' : animTapa(n.id))
+        : sinUso ? ' apagada' : '';
       g.append(svg('path', { d, class: `${on ? 'on' : ''}${tiempo}${dups.has(s.id) ? ' tapada' : ''}` }), svg('path', { d, class: 'hit' }));
       g.lastChild.append(svg('title'));
       g.lastChild.firstChild.textContent = 'Clic para desconectar';
@@ -484,11 +501,29 @@ function conectar(origen, salidaId, destino) {
 }
 
 function resumenNodo(n) {
-  if (n.tipo === 'accion') return n.accion ? resumenAccion(n.accion) : 'Elegí qué hace';
+  if (n.tipo === 'accion') return errorAccion(n.accion) || resumenAccion(n.accion);
   if (n.tipo === 'salto') return n.objetivo ? `Va a ${n.objetivo}` : 'Elegí a qué estado va';
   const mensajes = n.mensajes || [];
   if (!mensajes.length) return 'Sin mensajes';
   return resumenMensaje(mensajes[0]) + (mensajes.length > 1 ? ` · +${mensajes.length - 1}` : '');
+}
+
+// Por qué una acción no va a andar ('' si no se sabe de ningún problema)
+let googleInfo = null; // lo que devuelve /api/google
+function errorAccion(a) {
+  if (!a) return 'Elegí qué hace';
+  switch (a.tipo) {
+    case 'mail': return a.para?.trim() ? '' : 'Falta el destinatario';
+    case 'whatsapp': return !a.numero?.trim() ? 'Falta el número' : !a.texto?.trim() ? 'Falta el mensaje' : '';
+    case 'sheets':
+      if (googleInfo && !googleInfo.conectado) return 'Google no está conectado';
+      if (googleInfo && !googleInfo.sheets) return 'Faltan permisos de Google';
+      if (!a.planilla) return 'Falta elegir la planilla';
+      if (!(a.columnas || []).some(c => c.columna)) return 'Faltan las columnas';
+      if (a.modo === 'actualizar' && !a.buscarColumna) return 'Falta la columna donde buscar';
+      return '';
+    default: return '';
+  }
 }
 
 function resumenAccion(a) {
@@ -522,28 +557,29 @@ function renderArbol() {
   const divs = nodos.map(n => {
     const esRaiz = n.id === 'inicio';
     const esAccion = n.tipo === 'accion', esSalto = n.tipo === 'salto';
-    const salidas = filasDe(n), cero = salidaCero(n), auto = n.timed ? null : pasaSola(n);
+    const salidas = filasDe(n), cero = salidaCero(n);
     const dups = repetidas(n);
-    const div = el('div', { class: `fnode${esAccion ? ' accion' : esSalto ? ' salto' : ''}${n.id === estadoPrueba ? ' actual' : ''}${espera?.nodo === n.id ? ' esperando' : ''}${dups.size ? ' con-error' : ''}${rutas.has(n.id) ? '' : ' suelto'}${n.id === seleccionado ? ' sel' : marcados.has(n.id) ? ' marcado' : ''}` },
+    const div = el('div', { class: `fnode${esAccion ? ' accion' : esSalto ? ' salto' : ''}${n.id === estadoPrueba ? ' actual' : ''}${espera?.nodo === n.id ? ' esperando' : ''}${dups.size || esAccion && errorAccion(n.accion) ? ' con-error' : ''}${rutas.has(n.id) ? '' : ' suelto'}${n.id === seleccionado ? ' sel' : marcados.has(n.id) ? ' marcado' : ''}` },
       el('div', { class: 'fhead' },
         esRaiz ? el('span', { class: 'num raiz', title: 'Primer mensaje', innerHTML: ICONO_CHAT }) : el('span', { class: 'port in', title: 'Soltá acá una salida para conectar' }),
         esAccion ? el('span', { class: 'num' }, '⚙') : esSalto ? el('span', { class: 'num' }, '↪') : null,
         el('span', { class: 'txt' },
-          el('b', { class: !esRaiz && !n.nombre ? 'vacio' : '' }, nombreDe(n)),
+          el('b', { class: !esRaiz && !n.nombre ? 'vacio' : '' }, nombreDe(n), n.guardarEn ? ` → {${n.guardarEn}}` : ''),
           el('small', {}, resumenNodo(n))),
         n.timed ? el('span', { class: `reinicio${animTapa(n.id)}`, title: nodo(cero?.destino) ? `Pasa solo a ${nombreDe(nodo(cero.destino))} a los ${esperaDe(n)} s` : `Tras ${esperaDe(n)} s la charla se reinicia` }, `⏱ ${esperaDe(n)} s`)
-          : terminal(n) ? null : el('span', { class: 'reinicio apagado', title: auto ? `Pasa solo a ${nombreDe(nodo(auto.destino))} a los ${esperaDe(n)} s` : autoFin(n) ? `Tras ${esperaDe(n)} s la charla se reinicia` : 'No es por tiempo' }, `⏱ ${esperaDe(n)} s`),
-        terminal(n) ? null : el('span', { class: `port out cero${n.timed ? animTapa(n.id) : ' apagado'}`, 'data-salida': cero?.id || CERO,
+          : terminal(n) ? null : el('span', { class: 'reinicio apagado', title: autoFin(n) ? `Tras ${esperaDe(n)} s la charla se reinicia` : 'No es por tiempo' }, `⏱ ${esperaDe(n)} s`),
+        esAccion ? el('span', { class: `port out cero${nodo(cero?.destino) ? '' : ' apagado'}`, 'data-salida': cero?.id || CERO, title: 'Después de la acción sigue acá: arrastrá hasta otra acción o estado' })
+        : terminal(n) ? null : el('span', { class: `port out cero${n.timed && nodo(cero?.destino) ? animTapa(n.id) : ' apagado'}`, 'data-salida': cero?.id || CERO,
           title: n.timed ? 'Salida por tiempo: arrastrá hasta un estado para conectar' : 'Salida por tiempo (se usa solo si el estado es por tiempo)' })),
       salidas.length ? el('ul', { class: 'fsal' }, ...salidas.map(s => el('li', {
-        class: `${nodo(s.destino) ? '' : 'libre'}${dups.has(s.id) ? ' tapada' : ''}${n.timed ? ' off' + animTapa(n.id) : tapadaNum(n, s) ? ' off' + animNum(n.id) : ''}`, 'data-salida': s.id,
+        class: `${nodo(s.destino) ? '' : 'libre'}${dups.has(s.id) ? ' tapada' : ''}${n.timed ? ' off' + animTapa(n.id) : ''}`, 'data-salida': s.id,
         title: dups.has(s.id) ? `Apagada: una respuesta anterior ya escucha "${dups.get(s.id)}"` : '' },
-        s.numero ? el('span', { class: 'cualquiera' }, `# ${n.numerico === 'decimal' ? 'Número decimal' : 'Número entero'}${n.guardarEn ? ` → {${n.guardarEn}}` : ''}`)
-        : s.cualquiera
-          ? el('span', { class: 'cualquiera' }, `✱ Cualquier respuesta${n.guardarEn ? ` → {${n.guardarEn}}` : ''}`)
-          : el('span', { class: s.texto ? '' : 'vacio' }, s.texto || 'Sin texto'),
-        el('span', { class: `port out${!n.timed && (!escucha(s) && auto !== s || tapadaNum(n, s)) ? ' apagado' : ''}`, 'data-salida': s.id, title: 'Arrastrá hasta un estado para conectar' }))),
-        n.timed ? tapaReloj(0, animTapa(n.id)) : n.numerico && salidas.length > 1 ? tapaNumero(animNum(n.id)) : null) : null);
+        s.numero ? el('span', { class: 'cualquiera' }, `${pideArchivo(n) ? '📎' : '#'} ${TIPOS_RESPUESTA[n.numerico] || 'Número entero'}`)
+        : el('span', { class: s.texto ? '' : 'vacio' }, s.texto || 'Sin texto'),
+        el('span', { class: `port out${!nodo(s.destino) || !n.timed && !escucha(s) ? ' apagado' : ''}`, 'data-salida': s.id, title: 'Arrastrá hasta un estado para conectar' }))),
+        // "0. Menú" lo agrega el bot solo: se muestra fijo, sin conexión
+        !esRaiz && !n.numerico && !n.timed ? el('li', { class: 'fija', title: 'Automática: vuelve al primer mensaje' }, el('span', {}, 'Menú')) : null,
+        n.timed ? tapaReloj(0, animTapa(n.id)) : null) : null);
     div.style.left = `${n.pos.x}px`;
     div.style.top = `${n.pos.y}px`;
     div.dataset.id = n.id;
@@ -615,7 +651,9 @@ function renderArbol() {
     const otro = id && nodo(id);
     if (!otro || otro === gesto.nodo) return null;
     if ((gesto.desdeSalida ? otro : gesto.nodo).id === 'inicio') return null;
-    if (terminal(gesto.desdeSalida ? gesto.nodo : otro)) return null;
+    // De una acción solo sale su salida por tiempo (arrastrada desde su puerto)
+    const origen = gesto.desdeSalida ? gesto.nodo : otro;
+    if (origen.tipo === 'salto' || origen.tipo === 'accion' && !gesto.desdeSalida) return null;
     if (gesto.desdeSalida) return { origen: gesto.nodo, destino: otro };
     // Soltado sobre una respuesta concreta: se reconecta esa en vez de agregar una nueva
     const salida = bajo.closest('[data-salida]')?.dataset.salida || null;
@@ -741,7 +779,7 @@ function cerrarDetalle() {
 function editarEnLienzo(n, salidaId) {
   const s = n.salidas?.find(x => x.id === salidaId);
   const li = $(`.fnode[data-id="${n.id}"] .fsal li[data-salida="${salidaId}"]`);
-  if (!s || !li || s.cualquiera || s.numero) return;
+  if (!s || !li || s.numero || n.timed) return;
   const input = el('input', { class: 'fsal-input', value: s.texto || '', placeholder: 'Qué escucha', 'aria-label': 'Qué escucha' });
   input.addEventListener('input', () => { s.texto = input.value; cambio(); marcarRepetidas(n); });
   input.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === 'Escape') input.blur(); });
@@ -760,7 +798,7 @@ function clicEnReloj(n) {
     return editarEsperaEnLienzo(n);
   }
   clearTimeout(clicReloj?.t);
-  clicReloj = { id: n.id, t: setTimeout(() => { clicReloj = null; alternarTiempo(n, !(n.timed ?? !!pasaSola(n))); }, 250) };
+  clicReloj = { id: n.id, t: setTimeout(() => { clicReloj = null; alternarTiempo(n, !n.timed); }, 250) };
 }
 
 function editarEsperaEnLienzo(n) {
@@ -821,19 +859,25 @@ function editorMensajes(n) {
   const rehacer = () => { editado(); renderDetalle(); };
   let arrastrado = null;
   const items = n.mensajes.map((m, i) => {
-    const tipos = el('div', { class: 'segmented', role: 'radiogroup', 'aria-label': 'Tipo de mensaje' },
-      ...Object.entries(TIPOS).map(([v, t]) => el('button', {
-        type: 'button', role: 'radio', 'aria-checked': String((TIPOS[m.tipo] ? m.tipo : 'texto') === v),
-        onclick: () => { if (m.tipo !== v) { m.tipo = v; rehacer(); } },
-      }, t)));
+    // La etiqueta del primer campo sube a la fila de la manija
+    const campos = contenido(m);
+    const primero = campos[0];
+    const titulo = primero?.tagName === 'LABEL' && primero.firstChild?.nodeType === Node.TEXT_NODE ? primero.firstChild : null;
+    if (titulo) primero.removeChild(titulo);
     // Se arrastra desde la manija; soltar sobre otra tarjeta la pone en su lugar
     const tarjeta = el('div', { class: 'mensaje' },
       el('div', { class: 'mensaje-top' },
         el('span', { class: 'grip', title: 'Arrastrá para reordenar', 'aria-hidden': 'true',
           onmousedown: () => { tarjeta.draggable = true; }, onmouseup: () => { tarjeta.draggable = false; } }, '⠿'),
-        el('span', { class: 'num' }, String(i + 1)), tipos,
+        el('span', { class: 'mensaje-titulo' }, titulo?.textContent || ''),
         el('button', { type: 'button', class: 'icon-btn', title: 'Quitar', 'aria-label': 'Quitar mensaje', onclick: () => { n.mensajes.splice(i, 1); rehacer(); } }, '×')),
-      ...contenido(m));
+      ...campos);
+    // Los textos crecen con el contenido
+    tarjeta.querySelectorAll('textarea').forEach(t => {
+      const ajustar = () => { t.style.height = 'auto'; t.style.height = `${t.scrollHeight + 2}px`; };
+      t.addEventListener('input', ajustar);
+      requestAnimationFrame(ajustar);
+    });
     tarjeta.addEventListener('dragstart', e => { arrastrado = i; e.dataTransfer.effectAllowed = 'move'; tarjeta.classList.add('arrastrando'); });
     tarjeta.addEventListener('dragend', () => { tarjeta.draggable = false; tarjeta.classList.remove('arrastrando'); });
     tarjeta.addEventListener('dragover', e => { if (arrastrado === null || arrastrado === i) return; e.preventDefault(); tarjeta.classList.add('destino'); });
@@ -847,14 +891,14 @@ function editorMensajes(n) {
     });
     return tarjeta;
   });
-  return el('div', { class: 'mensajes' }, ...items,
+  return el('div', { class: 'mensajes editor-mensajes' }, ...items,
     el('button', { type: 'button', class: 'tree-add', onclick: () => { n.mensajes.push({ tipo: 'texto', texto: '' }); rehacer(); } }, '+ Agregar mensaje'));
 }
 
 
 /* ---------- Acciones de un estado ---------- */
 const TIPOS_ACCION = { mail: 'Mandar un mail', whatsapp: 'Mandar un WhatsApp', sheets: 'Escribir en Google Sheets' };
-const VARIABLES = '{nombre} {telefono} {mensaje} {fecha} {hora}';
+const VARIABLES = '{nombre} {telefono} {mensaje} {fecha} {hora} {opciones}';
 const AYUDA_VARIABLES = '/ayuda/variables';
 
 // Variables propias del agente: las que guardan los estados que preguntan algo
@@ -865,7 +909,8 @@ function ayudaVariables(extra = '') {
   const propias = variablesPropias();
   return el('small', { class: 'help' }, `En los textos podés usar ${VARIABLES}. `,
     ...(propias.length ? [`Las que definiste: ${propias.map(v => `{${v}}`).join(' ')}. `] : []),
-    'También podés usar variables propias: ', el('a', { href: AYUDA_VARIABLES, target: '_blank', rel: 'noopener', class: 'link-ayuda' }, 'cómo definir una variable'), '. ',
+    'Para mandar un archivo, usá la variable donde lo guardaste: va adjunto al mensaje. ',
+    'También podés usar variables propias: ', el('a', { href: AYUDA_VARIABLES, class: 'link-ayuda' }, 'cómo definir una variable'), '. ',
     extra);
 }
 
@@ -1048,11 +1093,47 @@ async function pintarPlanillas() {
           el('span', { class: p.acciones ? 'uso' : 'sin-uso' }, p.acciones
             ? `Referenciada por ${p.acciones} ${p.acciones === 1 ? 'acción' : 'acciones'} (${p.agentes.join(', ')})`
             : 'Sin acciones que la usen'))),
-      el('a', { href: p.url, target: '_blank', rel: 'noopener', class: 'btn btn-outline btn-sm' }, 'Abrir ↗'), vistaPlanilla(p))));
+      el('a', { href: p.url, target: '_blank', rel: 'noopener', class: 'btn btn-outline btn-sm' }, 'Abrir ↗'),
+      el('button', { type: 'button', class: 'btn btn-ghost btn-sm btn-danger', onclick: () => borrarPlanilla(p) }, 'Borrar'), vistaPlanilla(p))));
   } catch {
     estado.className = 'help mal';
     estado.textContent = planillasError;
     lista.replaceChildren();
+  }
+}
+
+function confirmarBorrado(p) {
+  return new Promise(resolve => {
+    const input = el('input', { type: 'text', autocomplete: 'off', spellcheck: false, placeholder: p.nombre });
+    const borrar = el('button', { type: 'submit', class: 'btn btn-danger-solid', disabled: true }, 'Borrar planilla');
+    input.oninput = () => { borrar.disabled = input.value.trim() !== p.nombre; };
+    const dlg = el('dialog', { class: 'confirmar' },
+      el('form', { method: 'dialog', class: 'card' },
+        el('h3', {}, 'Borrar planilla'),
+        el('p', {}, 'Vas a mandar ', el('b', {}, p.nombre), ' a la papelera de tu Google Drive.'),
+        p.acciones ? el('p', { class: 'confirmar-aviso' }, `La usan ${p.acciones} ${p.acciones === 1 ? 'acción' : 'acciones'} (${p.agentes.join(', ')}): van a dejar de funcionar.`) : null,
+        el('label', {}, el('span', {}, 'Escribí ', el('code', {}, p.nombre), ' para confirmar'), input),
+        el('div', { class: 'confirmar-botones' },
+          el('button', { type: 'button', class: 'btn btn-outline', onclick: () => dlg.close() }, 'Cancelar'),
+          borrar)));
+    dlg.addEventListener('submit', e => { if (borrar.disabled) e.preventDefault(); else dlg.returnValue = 'ok'; });
+    dlg.addEventListener('close', () => { resolve(dlg.returnValue === 'ok'); dlg.remove(); });
+    dlg.addEventListener('click', e => { if (e.target === dlg) dlg.close(); });
+    document.body.append(dlg);
+    dlg.showModal();
+    input.focus();
+  });
+}
+
+async function borrarPlanilla(p) {
+  if (!await confirmarBorrado(p)) return;
+  try {
+    await api('DELETE', `/api/planillas/${p.id}`);
+    hojasCache.delete(p.id);
+    await pintarPlanillas();
+  } catch (err) {
+    $('#planillasEstado').className = 'help mal';
+    $('#planillasEstado').textContent = mensajeGoogle(err);
   }
 }
 
@@ -1096,7 +1177,8 @@ function editorAccion(n) {
     resultado.textContent = 'Probando…';
     try {
       await guardarPendiente();
-      const r = await api('POST', `/api/bots/${botId}/acciones/probar`, { accion: a });
+      const r = await api('POST', `/api/bots/${botId}/acciones/probar`, { accion: a, whatsappConectado: whatsappConectado() });
+      await enviarPendientes(r);
       resultado.classList.add(r.ok ? 'ok' : 'mal');
       resultado.textContent = r.detalle;
     } catch (err) {
@@ -1123,7 +1205,7 @@ function alternarTiempo(n, activo) {
 // Temporizado: no escucha; tras la espera sigue solo por la primera salida
 function temporizado(n) {
   // Sin respuestas que escuchar ya pasa solo por tiempo: arranca tildado salvo que lo hayan destildado
-  const activo = n.timed ?? !!pasaSola(n);
+  const activo = !!n.timed;
   const seg = el('input', { type: 'number', min: 0, step: 1, value: esperaDe(n), disabled: !activo, 'aria-label': 'Segundos de espera' });
   seg.addEventListener('input', () => { n.espera = Math.max(0, Number(seg.value) || 0); editado(); renderArbol(); });
   const check = el('input', { type: 'checkbox', checked: activo, onchange: () => {
@@ -1136,20 +1218,35 @@ function temporizado(n) {
 function alternarNumero(n, tipo) {
   if (tipo) {
     if (n.numerico) { n.numerico = tipo; return rehacerTodo(); }
-    (n.salidas ??= []).unshift({ id: nuevoId(), numero: true, destino: null });
-    n.numerico = tipo; animNumero = n.id; rehacerTodo(); animNumero = null; return;
+    (n.salidas ??= []).push({ id: nuevoId(), numero: true, destino: null });
+    n.numerico = tipo; return rehacerTodo();
   }
-  saleNumero = n.id; renderArbol();
-  setTimeout(() => {
-    saleNumero = null;
-    delete n.numerico;
-    n.salidas = (n.salidas || []).filter(s => !s.numero);
-    rehacerTodo();
-  }, 200);
+  delete n.numerico;
+  n.salidas = (n.salidas || []).filter(s => !s.numero);
+  rehacerTodo();
 }
 
-// Estado que pregunta algo: lo que conteste el cliente se guarda en una variable, y la charla sigue
-// por la salida "Cualquier respuesta" (que se agrega sola)
+// Asegura el tipo de respuesta: un número (entero o decimal) o un archivo (pedirle una foto, un comprobante, un audio…);
+// si manda otra cosa, contesta un mensaje y se queda. El de tiempo tiene precedencia.
+function numerico(n) {
+  const activo = !!n.numerico;
+  const opciones = tipos => tipos.map(t => el('option', { value: t }, TIPOS_RESPUESTA[t]));
+  const tipo = el('select', { disabled: !activo, 'aria-label': 'Tipo de respuesta', onchange: () => alternarNumero(n, tipo.value) },
+    el('optgroup', { label: 'Número' }, ...opciones(['entero', 'decimal'])),
+    el('optgroup', { label: 'Archivo' }, ...opciones(['imagen', 'documento', 'audio', 'video', 'archivo'])));
+  tipo.value = TIPOS_RESPUESTA[n.numerico] ? n.numerico : 'entero';
+  const check = el('input', { type: 'checkbox', checked: activo, onchange: () => alternarNumero(n, check.checked && tipo.value) });
+  const archivo = pideArchivo(n);
+  const ayuda = archivo
+    ? `Acepta ${TIPOS_RESPUESTA[n.numerico].toLowerCase()}${n.numerico === 'audio' ? ' (también notas de voz)' : ''}.${n.guardarEn ? ` En {${n.guardarEn}} queda el link al archivo.` : ''} Conectá la salida de archivo al estado que sigue. Las otras respuestas se siguen escuchando.`
+    : `Acepta ${n.numerico === 'decimal' ? 'decimales con coma o punto' : 'solo enteros'}. Conectá la salida de número al estado que sigue. Las otras respuestas (por ejemplo "menú") se siguen escuchando.`;
+  return el('div', { class: 'temporizado' }, el('label', { class: 'switch' }, check, el('span', {}, 'Asegurar tipo de respuesta')),
+    activo ? el('span', { class: `tiempo-seg${n.timed ? ' off' : ''}` }, tipo) : null,
+    activo ? campo(archivo ? 'Si manda otra cosa' : 'Si no manda un número válido', n, 'msgNumero', { placeholder: archivo ? 'Por favor, enviá un archivo.' : 'Por favor, respondé con un número válido.' }) : null,
+    activo ? el('small', { class: 'help' }, n.timed ? 'Sin efecto mientras el nodo sea por tiempo.' : ayuda) : null);
+}
+
+// Estado que pregunta algo: lo que conteste el cliente se guarda en una variable (se ve en el título: nombre → {variable})
 function guardarEnVariable(n) {
   const input = el('input', { value: n.guardarEn || '', placeholder: 'nombre_cliente', 'aria-label': 'Variable donde se guarda la respuesta' });
   input.addEventListener('input', () => {
@@ -1158,40 +1255,18 @@ function guardarEnVariable(n) {
     n.guardarEn = limpio;
     editado();
   });
-  input.addEventListener('change', () => {
-    if (n.guardarEn && !(n.salidas || []).some(s => s.cualquiera)) (n.salidas ??= []).push({ id: nuevoId(), cualquiera: true, destino: null });
-    editado();
-    renderDetalle();
-  });
+  input.addEventListener('change', () => renderDetalle());
   return el('label', {}, 'Guardar lo que responda en una variable', input,
     el('small', {}, n.guardarEn
-      ? `Después la usás como {${n.guardarEn}} en mensajes y acciones. Conectá "Cualquier respuesta" al estado que sigue.`
-      : 'Opcional. Por ejemplo, si este estado pregunta el nombre, guardalo en nombre_cliente.'));
-}
-
-// Cómo se ofrecen las respuestas: lista numerada, encuesta de WhatsApp o sin mostrarlas (solo escucha)
-function formatoOpciones(n, esRaiz) {
-  const formato = el('select', { onchange: () => { n.formatoOpciones = formato.value; editado(); renderDetalle(); } },
-    el('option', { value: 'lista' }, 'Lista numerada'),
-    el('option', { value: 'encuesta' }, 'Encuesta de WhatsApp'),
-    el('option', { value: 'ninguno' }, 'No mostrarlas (solo escuchar)'));
-  formato.value = ['encuesta', 'ninguno'].includes(n.formatoOpciones) ? n.formatoOpciones : 'lista';
-  const ayuda = {
-    lista: `Se mandan numeradas después del último mensaje${esRaiz ? '' : ', con 0 para volver al menú anterior'}.`,
-    encuesta: 'Se elige con un toque. Hasta 12 opciones; si hay más, se mandan numeradas.',
-    ninguno: 'El cliente no las ve: el agente solo reacciona si escribe algo que coincida.',
-  }[formato.value];
-  return [
-    el('label', {}, 'Cómo se ofrecen', formato),
-    formato.value === 'encuesta' ? campo('Pregunta de la encuesta', n, 'pregunta', { placeholder: 'Elegí una opción' }) : null,
-    el('small', { class: 'help' }, ayuda),
-  ].filter(Boolean);
+      ? `Después la usás como {${n.guardarEn}} en mensajes y acciones.`
+      : 'Opcional. Por ejemplo, si este estado pregunta el nombre, guardalo en nombre_cliente.'),
+    n.guardarEn && pideArchivo(n) ? el('small', { class: 'help' }, 'Se guarda solo el archivo: el texto que lo acompañe se ignora. Donde uses la variable, el archivo va adjunto (en mensajes, mails y WhatsApp); en Sheets queda el link.') : null);
 }
 
 // Marca en el lienzo las respuestas repetidas del estado, mientras se escribe
 function marcarRepetidas(n) {
   const dups = repetidas(n);
-  for (const li of $$(`.fnode[data-id="${n.id}"] .fsal li`)) {
+  for (const li of $$(`.fnode[data-id="${n.id}"] .fsal li[data-salida]`)) {
     const frase = dups.get(li.dataset.salida);
     li.classList.toggle('tapada', !!frase);
     $(`.flow-edges g[data-padre="${n.id}"][data-salida="${li.dataset.salida}"] path:not(.hit)`)?.classList.toggle('tapada', !!frase);
@@ -1243,8 +1318,10 @@ function quitarUltima(n) {
   confirmarTacho = null;
   const filas = filasDe(n);
   if (filas.length) {
-    n.salidas.splice(n.salidas.indexOf(filas.at(-1)), 1);
-    if (filas.at(-1).numero) delete n.numerico;
+    // La de número se quita última: sacarla apaga el modo numérico
+    const ult = filas.findLast(s => !s.numero) || filas.at(-1);
+    n.salidas.splice(n.salidas.indexOf(ult), 1);
+    if (ult.numero) delete n.numerico;
     rehacerTodo();
   } else if (n.id !== 'inicio') {
     eliminarEstado(n);
@@ -1360,7 +1437,6 @@ function renderDetalle() {
     guardarEnVariable(n),
     terminal(n) ? null : temporizado(n),
     terminal(n) ? null : numerico(n),
-    ...(!n.timed && !n.numerico && filasDe(n).some(s => !s.cualquiera) ? formatoOpciones(n, esRaiz) : []),
     esRaiz ? null : eliminar,
   ].filter(Boolean));
 }
@@ -1411,15 +1487,15 @@ async function abrirBot(id) {
   $('.app').classList.add('probando');
   mostrarSeccion($('.sections button[aria-current="true"]')?.dataset.sec);
   llenarForm(bot);
-  pintarEstado({ estado: 'desconectado', proveedor: bot.conexion?.proveedor, ...bot.estado });
-  // Con WhatsApp personal, si está desconectado se conecta solo: retoma la sesión recordada o muestra el QR
-  if ((bot.estado?.estado || 'desconectado') === 'desconectado' && bot.conexion?.proveedor === 'baileys') {
-    api('POST', `/api/bots/${bot.id}/conectar`).then(r => { if (botId === bot.id) pintarEstado(r); }).catch(() => {});
-  }
+  wa?.cerrar();
+  wa = null;
+  pintarEstado({ estado: 'desconectado', proveedor: bot.conexion?.proveedor, ...(bot.conexion?.proveedor === 'baileys' ? {} : bot.estado) });
+  // Con WhatsApp personal se conecta solo: retoma la sesión recordada o muestra el QR
+  if (prepararWhatsApp(bot.conexion?.proveedor)) wa.conectar();
   reiniciarConvs();
   reiniciarChat(false);
   $('#saved').textContent = '';
-  escucharEventos();
+  escucharEventos(bot.conexion?.proveedor);
   if (!$('.sec[data-sec="metricas"]').hidden) cargarMetricas();
 }
 
@@ -1428,40 +1504,8 @@ async function crearAgente() {
   const bot = await api('POST', '/api/bots', {});
   bots.push({ id: bot.id, nombre: bot.agente.nombre, estado: 'desconectado' });
   await abrirBot(bot.id);
-  mostrarSeccion('comportamiento');
-  form.elements['agente.nombre'].select();
+  mostrarSeccion('respuestas');
 }
-
-/* ---------- Descargar el agente ---------- */
-async function prepararDescarga() {
-  const disponibles = await api('GET', '/api/descargas').catch(() => []);
-  for (const a of $$('.descarga a[data-plataforma]')) {
-    const ok = disponibles.includes(a.dataset.plataforma);
-    a.setAttribute('aria-disabled', String(!ok));
-    if (!ok) a.title = 'Todavía no está disponible';
-    a.onclick = async e => {
-      e.preventDefault();
-      await guardarPendiente();
-      location.href = `/api/bots/${botId}/descargar?plataforma=${a.dataset.plataforma}`;
-    };
-  }
-}
-
-/* ---------- Estado del servidor ---------- */
-// Verde: responde bien · amarillo: lento o avisado como degradado · rojo: no responde o avisado como caído
-const TEXTOS_SERVIDOR = { operativo: 'Servidores operativos', degradado: 'Servidores bajo carga', caido: 'Sin contacto con servidores' };
-async function revisarServidor() {
-  const t0 = performance.now();
-  let estado = 'caido';
-  try {
-    const res = await fetch('/api/estado', { cache: 'no-store', signal: AbortSignal.timeout(8000) });
-    if (res.ok) estado = (await res.json()).estado;
-    if (estado === 'operativo' && performance.now() - t0 > 2000) estado = 'degradado';
-  } catch {}
-  $('#servidor').dataset.estado = estado;
-  $('#servidorTexto').textContent = TEXTOS_SERVIDOR[estado] || TEXTOS_SERVIDOR.operativo;
-}
-setInterval(revisarServidor, 30000);
 
 /* ---------- Conexión ---------- */
 const ETIQUETAS = { desconectado: 'Desconectado', conectando: 'Desconectado', esperando_qr: 'Desconectado', conectado: 'Conectado', error: 'Error' };
@@ -1491,10 +1535,98 @@ const convs = new Map(); // chatId -> { nombre, msgs, leido }
 let convSel = null;
 const horaLog = ts => new Date(ts).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
 
+// Las conversaciones se guardan en el navegador (por agente) para leerlas aunque el agente esté apagado
+const claveConvs = () => `convs:${botId}`;
+function guardarConvs() {
+  const datos = [...convs].map(([id, c]) => [id, { ...c, msgs: c.msgs.slice(-300) }]);
+  guardarLocal(claveConvs(), JSON.stringify(datos));
+}
+
 function reiniciarConvs() {
   convs.clear();
   convSel = null;
+  try { for (const [id, c] of JSON.parse(leer(claveConvs()) || '[]')) convs.set(id, c); } catch {}
   pintarConvs();
+}
+
+// Íconos de adjuntos (trazos de 24×24)
+const ICONOS_ADJ = {
+  imagen: 'M3 8a2 2 0 0 1 2-2h2l2-2h6l2 2h2a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM12 17a4 4 0 1 0 0-8 4 4 0 0 0 0 8z',
+  video: 'M3 7a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM16 10l5-3v10l-5-3',
+  audio: 'M9 18V5l12-2v13M9 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0zM21 16a3 3 0 1 1-6 0 3 3 0 0 1 6 0z',
+  mic: 'M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3zM19 10v2a7 7 0 0 1-14 0v-2M12 19v3',
+  documento: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6',
+  sticker: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01',
+  ubicacion: 'M12 22s7-6.5 7-12a7 7 0 0 0-14 0c0 5.5 7 12 7 12zM12 12.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z',
+  contacto: 'M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z',
+  clip: 'M21 11l-8.5 8.5a5 5 0 0 1-7-7L14 4a3.5 3.5 0 0 1 5 5l-8.5 8.5a2 2 0 0 1-3-3L15 7',
+};
+function iconoAdj(nombre, tam = 13) {
+  const ic = svg('svg', { viewBox: '0 0 24 24', width: tam, height: tam, fill: 'none', stroke: 'currentColor', 'stroke-width': 2, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true', class: 'ic-adj' });
+  ic.append(svg('path', { d: ICONOS_ADJ[nombre] || ICONOS_ADJ.clip }));
+  return ic;
+}
+const ADJUNTOS = { imagen: ['imagen', 'Foto'], video: ['video', 'Video'], gif: ['video', 'GIF'], audio: ['audio', 'Audio'], 'nota de voz': ['mic', 'Audio'], documento: ['documento', 'Documento'], sticker: ['sticker', 'Sticker'], ubicacion: ['ubicacion', 'Ubicación'], contacto: ['contacto', 'Contacto'] };
+// Contenido de un mensaje del registro como nodos: ícono + etiqueta del adjunto (si hay) y el texto
+const contenidoMsg = m => {
+  if (!m.adjunto) return [m.texto ?? ''];
+  const [ic, etiqueta] = ADJUNTOS[m.adjunto.tipo] || ['clip', 'Adjunto'];
+  const nombre = m.adjunto.tipo === 'documento' && m.adjunto.nombreArchivo || etiqueta;
+  return [iconoAdj(ic), ` ${nombre}`, m.texto ? ` · ${m.texto}` : ''];
+};
+
+// Foto de perfil del contacto (o la inicial si no hay / venció la URL)
+function avatar(c) {
+  const ini = el('span', { class: 'avatar' }, (c.nombre || '?').trim()[0]?.toUpperCase() || '?');
+  if (!c.foto) return ini;
+  const img = el('img', { class: 'avatar', src: c.foto, alt: '' });
+  img.onerror = () => img.replaceWith(ini);
+  return img;
+}
+
+function ponerFoto(chatId, url) {
+  const c = convs.get(chatId);
+  if (!c || c.foto === url) return;
+  c.foto = url;
+  pintarConvs();
+  guardarConvs();
+}
+
+// Los archivos de los adjuntos los guarda el worker en IndexedDB; acá se leen y se cachean ya armados
+const mediaDB = (() => { let p; return () => p ??= new Promise((ok, mal) => {
+  const r = indexedDB.open('adjuntos', 1);
+  r.onupgradeneeded = () => r.result.createObjectStore('media');
+  r.onsuccess = () => ok(r.result);
+  r.onerror = () => mal(r.error);
+}); })();
+async function idb(fn) {
+  const db = await mediaDB();
+  return new Promise((ok, mal) => {
+    const t = db.transaction('media', 'readonly');
+    const r = fn(t.objectStore('media'));
+    t.oncomplete = () => ok(r.result);
+    t.onerror = () => mal(t.error);
+  });
+}
+const vistasMedia = new Map(); // id → elemento (se reusa para no cortar un audio al repintar)
+const mediaLista = id => { vistasMedia.delete(id); pintarConvs(); };
+async function cargarMedia(a) {
+  vistasMedia.set(a.id, null);
+  const blob = await idb(st => st.get(a.id)).catch(() => null);
+  if (blob) { vistasMedia.delete(a.id); vistaMedia({ ...a, blob }); pintarConvs(); }
+}
+function vistaMedia(a) {
+  if (vistasMedia.has(a.id)) return vistasMedia.get(a.id);
+  if (!a.blob) { cargarMedia(a); return null; }
+  const url = URL.createObjectURL(a.blob);
+  const tipo = a.tipo;
+  const v = tipo === 'imagen' || tipo === 'sticker' ? el('a', { href: url, target: '_blank' }, el('img', { src: url, alt: '', class: tipo === 'sticker' ? 'sticker' : '' }))
+    : tipo === 'gif' ? el('video', { src: url, autoplay: true, loop: true, muted: true, playsInline: true })
+    : tipo === 'video' ? el('video', { src: url, controls: true, preload: 'metadata' })
+    : tipo === 'audio' || tipo === 'nota de voz' ? el('audio', { src: url, controls: true, preload: 'metadata' })
+    : el('a', { href: url, download: a.nombreArchivo || 'archivo', class: 'adj' }, el('i', {}, iconoAdj('documento', 15)), el('span', {}, a.nombreArchivo || 'Documento', el('small', {}, 'Descargar')));
+  vistasMedia.set(a.id, v);
+  return v;
 }
 
 function pintarConvs() {
@@ -1509,20 +1641,24 @@ function pintarConvs() {
     const sinLeer = c.msgs.length - c.leido;
     return el('li', { class: id === convSel ? 'sel' : '' },
       el('button', { type: 'button', onclick: () => { convSel = id; pintarConvs(); } },
+        avatar(c),
         el('span', { class: 'conv-top' },
           el('b', {}, c.nombre),
           el('time', {}, horaLog(ult.ts))),
         el('span', { class: 'conv-bot' },
-          el('span', { class: 'conv-prev' }, `${ult.de === 'bot' ? 'Agente: ' : ''}${ult.texto}`),
+          el('span', { class: 'conv-prev' }, ult.de === 'bot' ? 'Agente: ' : '', ...contenidoMsg(ult)),
           sinLeer > 0 && id !== convSel ? el('span', { class: 'count' }, sinLeer) : null)));
   }));
   const c = convs.get(convSel);
   c.leido = c.msgs.length;
-  $('#convHead').textContent = `${c.nombre} · ${c.msgs.length} mensajes`;
+  $('#convHead').replaceChildren(avatar(c), el('span', {}, `${c.nombre} · ${c.msgs.length} mensajes`));
   const msgs = $('#convMsgs');
   const abajo = msgs.scrollHeight - msgs.scrollTop - msgs.clientHeight < 40;
-  msgs.replaceChildren(...c.msgs.map(m => el('div', { class: `msg ${m.de === 'bot' ? 'bot' : 'yo'}`, title: horaLog(m.ts) },
-    m.texto, el('small', { class: 'msg-hora' }, horaLog(m.ts)))));
+  msgs.replaceChildren(...c.msgs.map(m => {
+    const media = m.adjunto?.id && vistaMedia(m.adjunto);
+    return el('div', { class: `msg ${m.de === 'bot' ? 'yo' : 'bot'}`, title: horaLog(m.ts) },
+      ...(media ? [media, m.texto || null] : contenidoMsg(m)), el('small', { class: 'msg-hora' }, horaLog(m.ts)));
+  }));
   if (abajo || c.msgs.length === 1) msgs.scrollTop = msgs.scrollHeight;
 }
 
@@ -1532,14 +1668,53 @@ function agregarLog(m) {
   if (m.de !== 'bot' && m.nombre) c.nombre = m.nombre;
   c.msgs.push(m);
   pintarConvs();
+  guardarConvs();
 }
 
-function escucharEventos() {
-  eventos?.close();
-  eventos = new EventSource(`/api/bots/${botId}/eventos`);
-  eventos.addEventListener('status', e => pintarEstado(JSON.parse(e.data)));
-  eventos.addEventListener('mensaje', e => agregarLog(JSON.parse(e.data)));
-  eventos.addEventListener('metricas', () => { if (!$('.sec[data-sec="metricas"]').hidden) cargarMetricas(); });
+// WhatsApp personal corre en esta pestaña; el resto de los proveedores, en el servidor
+function prepararWhatsApp(proveedor) {
+  if (proveedor !== 'baileys') { wa?.desconectar(); wa = null; return null; }
+  wa ??= crearWhatsApp({
+    botId, api,
+    alEstado: pintarEstado,
+    alMensaje: agregarLog,
+    alFoto: ponerFoto,
+    alMetricas: () => { if (!$('.sec[data-sec="metricas"]').hidden) cargarMetricas(); },
+    alMedia: mediaLista,
+  });
+  return wa;
+}
+
+// Para las acciones de WhatsApp que el servidor deja para que salgan desde acá
+const whatsappConectado = () => wa?.estado().estado === 'conectado';
+async function enviarPendientes(r) {
+  for (const w of r.whatsapp || []) await wa.enviar(w.jid, w.mensaje);
+}
+
+// Con la API de Meta las charlas pasan por el servidor: el registro se trae cada unos segundos
+// (desde el último mensaje que ya está guardado en este navegador)
+let registroTimer = null, proveedorActual = null;
+function escucharEventos(proveedor) {
+  clearTimeout(registroTimer);
+  proveedorActual = proveedor;
+  if (proveedor !== 'meta') return;
+  const id = botId, clave = `registro:${id}`;
+  const traer = async () => {
+    if (botId !== id) return;
+    if (!document.hidden) {
+      try {
+        const nuevos = await api('GET', `/api/bots/${id}/registro?desde=${Number(leer(clave)) || 0}`);
+        if (botId !== id) return;
+        for (const m of nuevos) agregarLog(m);
+        if (nuevos.length) {
+          guardarLocal(clave, String(nuevos.at(-1).ts));
+          if (!$('.sec[data-sec="metricas"]').hidden) cargarMetricas();
+        }
+      } catch (err) { console.warn('Registro', err); }
+    }
+    registroTimer = setTimeout(traer, 4000);
+  };
+  traer();
 }
 
 async function accion(boton, fn) {
@@ -1549,14 +1724,25 @@ async function accion(boton, fn) {
   finally { boton.disabled = false; }
 }
 
+// Baja suave hasta la tarjeta de Conexión y la resalta un momento
+function irAConexion() {
+  const card = $('#conexionCard');
+  card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  card.classList.remove('resaltada');
+  void card.offsetWidth;
+  card.classList.add('resaltada');
+}
 $('#btnConectar').onclick = e => accion(e.currentTarget, async () => {
   await guardarPendiente();
   mostrarSeccion('comportamiento');
+  irAConexion();
+  if (wa) return wa.conectar();
   pintarEstado(await api('POST', `/api/bots/${botId}/conectar`));
 });
-$('#btnDesconectar').onclick = e => accion(e.currentTarget, () => api('POST', `/api/bots/${botId}/desconectar`));
+$('#btnDesconectar').onclick = e => accion(e.currentTarget, async () => wa ? wa.desconectar() : pintarEstado(await api('POST', `/api/bots/${botId}/desconectar`)));
 $('#btnLogout').onclick = e => accion(e.currentTarget, async () => {
   if (!confirm('¿Desvincular este número? Para volver a conectarlo hay que escanear el QR de nuevo.')) return;
+  if (wa) { await wa.desconectar({ cerrarSesion: true }); return wa.conectar(); }
   await api('POST', `/api/bots/${botId}/desconectar`, { cerrarSesion: true });
   pintarEstado(await api('POST', `/api/bots/${botId}/conectar`));
 });
@@ -1567,6 +1753,7 @@ const FUENTES = {
   opcion: 'Opción elegida',
   llm: 'LLM',
   sin_coincidencia: 'No entendió',
+  no_numero: 'Respuesta de otro tipo',
 }
 const fmt = n => n.toLocaleString('es-AR');
 const fechaCorta = f => { const [, m, d] = f.split('-'); return `${Number(d)}/${Number(m)}`; };
@@ -1640,28 +1827,29 @@ function burbuja(clase, ...contenido) {
 }
 
 function adjunto(icono, titulo, sub) {
-  const a = el('div', { class: 'adj' }, el('span', {}, titulo, sub ? el('small', {}, sub) : null));
-  a.dataset.icono = icono;
-  return a;
+  return el('div', { class: 'adj' }, el('i', {}, iconoAdj(icono, 15)), el('span', {}, titulo, sub ? el('small', {}, sub) : null));
 }
 
 function mostrarMensaje(m) {
   switch (m.tipo) {
     case 'imagen':
-      return burbuja('bot', el('img', { src: m.url, alt: '' }), m.texto || null);
+      return burbuja('bot', mostrarEn(el('img', { alt: '' }), m.url), m.texto || null);
     case 'documento':
-      return burbuja('bot', adjunto('📄', m.nombreArchivo), m.texto || null);
+      return burbuja('bot', adjunto('documento', m.nombreArchivo), m.texto || null);
+    case 'audio':
+      return burbuja('bot', mostrarEn(el('audio', { controls: true }), m.url));
+    case 'video':
+      return burbuja('bot', mostrarEn(el('video', { controls: true }), m.url), m.texto || null);
     case 'ubicacion':
       return burbuja('bot', el('a', { href: `https://maps.google.com/?q=${m.lat},${m.lng}`, target: '_blank', rel: 'noopener' },
-        adjunto('📍', m.nombre || 'Ubicación', m.direccion || `${m.lat}, ${m.lng}`)));
+        adjunto('ubicacion', m.nombre || 'Ubicación', m.direccion || `${m.lat}, ${m.lng}`)));
     case 'contacto':
-      return burbuja('bot', adjunto('👤', m.nombre, m.telefono));
+      return burbuja('bot', adjunto('contacto', m.nombre, m.telefono));
     case 'encuesta':
       return burbuja('bot', el('b', {}, m.texto), el('div', { class: 'encuesta' }, ...m.opciones.map(o =>
         el('button', { type: 'button', onclick: () => { $('#tInput').value = o; $('#composer').requestSubmit(); } }, o))));
     default:
-      return burbuja('bot', ...formatoWhatsApp(m.texto), m.opciones?.length ? el('div', { class: 'encuesta' }, ...m.opciones.map(o =>
-        el('button', { type: 'button', onclick: () => { $('#tInput').value = o; $('#composer').requestSubmit(); } }, o))) : null);
+      return burbuja('bot', ...formatoWhatsApp(m.texto));
   }
 }
 
@@ -1720,7 +1908,8 @@ function pintarRespuesta(res) {
 async function avanzarChat(destino, sesion) {
   const escribiendo = burbuja('bot escribiendo', el('i'), el('i'), el('i'));
   try {
-    const res = await api('POST', `/api/bots/${botId}/probar`, { avanzar: destino, sesion });
+    const res = await api('POST', `/api/bots/${botId}/probar`, { avanzar: destino, sesion, whatsappConectado: whatsappConectado() });
+    enviarPendientes(res).catch(err => console.error('WhatsApp de acción', err));
     escribiendo.remove();
     if (sesion === sesionPrueba) pintarRespuesta(res);
   } catch (err) {
@@ -1737,23 +1926,45 @@ $('#composer').onsubmit = async e => {
   if (!texto || !botId) return;
   input.value = '';
   input.dispatchEvent(new Event('input'));
-  if (espera) { cancelAnimationFrame(espera.raf); espera = null; renderArbol(); }
   burbuja('yo', texto);
+  await enviarPrueba({ texto });
+};
+
+// Adjuntar un archivo en la charla de prueba (para los estados que piden uno): se sube y se manda como adjunto
+$('#tAdjunto').onchange = async () => {
+  const f = $('#tAdjunto').files[0];
+  $('#tAdjunto').value = '';
+  if (!f || !botId) return;
+  const tipo = /^image\//.test(f.type) ? 'imagen' : /^audio\//.test(f.type) ? 'audio' : /^video\//.test(f.type) ? 'video' : 'documento';
+  const b = burbuja('yo', tipo === 'imagen' ? el('img', { src: URL.createObjectURL(f), alt: '' }) : adjunto('documento', f.name));
+  try {
+    await enviarPrueba({ adjunto: { tipo, nombreArchivo: f.name, ...(await subirADrive(f, f.name)) } });
+  } catch (err) {
+    b.after(el('div', { class: 'msg bot' }, `No se pudo subir el archivo: ${err.message}`));
+  }
+};
+
+async function enviarPrueba(datos) {
+  if (espera) { cancelAnimationFrame(espera.raf); espera = null; renderArbol(); }
   const esperando = burbuja('bot escribiendo', el('i'), el('i'), el('i'));
   $('#tEstado').textContent = 'escribiendo…';
   try {
     await guardarPendiente();
-    const res = await api('POST', `/api/bots/${botId}/probar`, { texto, sesion: sesionPrueba });
+    const res = await api('POST', `/api/bots/${botId}/probar`, { ...datos, sesion: sesionPrueba, whatsappConectado: whatsappConectado() });
     esperando.remove();
-    pintarRespuesta(res);
-    chat.append(el('div', { class: 'fuente' }, ...etiquetaFuente(res)));
+    if (res.ignorado) chat.append(el('div', { class: 'fuente' }, 'Este estado no pide archivos: el agente no responde'));
+    else {
+      enviarPendientes(res).catch(err => console.error('WhatsApp de acción', err));
+      pintarRespuesta(res);
+      chat.append(el('div', { class: 'fuente' }, ...etiquetaFuente(res)));
+    }
   } catch (err) {
     esperando.className = 'msg bot';
     esperando.textContent = `No pude responder: ${err.message}`;
   }
   $('#tEstado').textContent = 'en línea';
   bajar();
-};
+}
 
 $('#tReset').onclick = () => reiniciarChat();
 
@@ -1775,16 +1986,25 @@ $('#tReset').onclick = () => reiniciarChat();
 }
 
 /* ---------- Inicio ---------- */
-$('#salir').onclick = async () => {
+const salir = todas => async () => {
   await guardarPendiente();
-  await fetch('/auth/salir', { method: 'POST' });
+  await fetch(`/auth/salir${todas ? '?todas=1' : ''}`, { method: 'POST' });
   location.href = '/login.html';
 };
+$('#salir').onclick = salir(false);
+$('#salirTodas').onclick = salir(true);
 
 /* ---------- Integraciones (cuenta de Google del dueño) ---------- */
 async function pintarGoogle(error = '') {
   const g = await api('GET', '/api/google').catch(() => ({ conectado: false }));
   const faltan = g.conectado && !g.sheets;
+  googleInfo = g;
+  renderArbol();
+  // En Planillas: si falta conectar Google (o sus permisos) se conecta desde ahí mismo
+  $('#planillasGoogle').hidden = g.conectado && g.sheets;
+  $('#planillasGoogle').closest('.card').classList.toggle('sin-google', !(g.conectado && g.sheets));
+  $('#planillasGoogleTexto').textContent = faltan ? 'A tu cuenta de Google le faltan permisos para las planillas.' : 'Conectá tu cuenta de Google para crear y usar planillas.';
+  $('#planillasConectar').textContent = faltan ? 'Volver a conectar' : 'Conectar Google';
   $('#googleEstado').textContent = error || (g.conectado
     ? `Conectada como ${g.email}${faltan ? '. Faltan permisos: volvé a conectarla.' : '. Las planillas de las acciones se crean en su Drive.'}`
     : 'Conectala para que las acciones puedan escribir en planillas de Google Sheets.');
@@ -1796,6 +2016,7 @@ async function pintarGoogle(error = '') {
   planillasError = '';
 }
 $('#googleConectar').onclick = async () => { await guardarPendiente(); location.href = '/auth/google/conectar'; };
+$('#planillasConectar').onclick = async () => { await guardarPendiente(); location.href = '/auth/google/conectar?volver=planillas'; };
 $('#googleDesconectar').onclick = async () => { await api('POST', '/api/google/desconectar'); pintarGoogle(); };
 
 async function iniciar() {
@@ -1812,8 +2033,6 @@ async function iniciar() {
   pintarGoogle(google === 'error' ? 'No se pudo conectar la cuenta de Google. Probá de nuevo.' : '');
   const sec = location.hash.slice(1);
   mostrarSeccion(sec);
-  prepararDescarga();
-  revisarServidor();
   // Con una sección en la URL se vuelve al agente en el que estaba; si no, arranca en el inicio
   if (id) await abrirBot(id);
   else await crearAgente();

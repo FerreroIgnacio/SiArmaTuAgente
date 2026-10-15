@@ -47,11 +47,6 @@
       <li><button type="button" data-sec="negocio" disabled>Negocio <em class="tag">Pronto</em></button></li>
     </ul>
     <div class="tabs-right descarga">
-      <a class="servidor" id="servidor" data-estado="operativo" href="https://sisoftwaresolutions.com" target="_blank" rel="noopener">
-        <i aria-hidden="true"></i><span id="servidorTexto">Servidores operativos</span>
-      </a>
-      <span class="help" title="¡No dependas de nuestros servidores! Podés correrlo vos localmente.">Correlo local:
-        <a href="#" data-plataforma="win-x64">Windows</a> · <a href="#" data-plataforma="linux-x64">Linux</a></span>
       <button type="button" class="btn btn-outline btn-sm" id="abrirProbar">Probar agente</button>
     </div>
   </nav>
@@ -86,30 +81,10 @@
         </div>
         <div class="card">
           <label>Nombre del agente<input name="agente.nombre" placeholder="Asistente"></label>
-          <label>Si no entiende el mensaje<textarea name="agente.fallback" rows="2" placeholder="Perdón, no te entendí. Escribí *menú* para ver las opciones."></textarea></label>
+          <label>Si no entiende el mensaje<textarea name="agente.fallback" rows="2" placeholder="Perdón, no te entendí. Escribí *menú* para ver las opciones."></textarea><small>Podés usar {nombre} {telefono} {mensaje} {fecha} {hora} {opciones}. {opciones} son las opciones del estado donde está la charla.</small></label>
+          <label>Al terminar la conversación<textarea name="agente.despedida" rows="2" placeholder="Gracias por escribirnos. ¡Hasta la próxima!"></textarea><small>Se manda cuando la charla llega a un estado final o cuando el cliente pasa 10 minutos sin escribir. Podés usar {nombre} {telefono} {mensaje} {fecha} {hora}.</small></label>
         </div>
-        <div class="card">
-          <h3>Configuración</h3>
-          <label class="switch"><input type="checkbox" name="reglas.ignorarGrupos"><span>No responder en grupos</span></label>
-          <div>
-            <label class="switch is-disabled"><input type="checkbox" name="agente.usarLLM" disabled><span>Utilizar LLM <em class="tag">Pronto</em></span></label>
-            <p class="help indent">Cuando ninguna respuesta coincide, genera una con el modelo local de la empresa en lugar del mensaje de "no entendí".</p>
-            <p class="help indent llm-estado" id="llmEstado" hidden></p>
-          </div>
-        </div>
-        <div class="card">
-          <h3>Integraciones</h3>
-          <div class="integracion">
-            <svg viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
-            <div>
-              <b>Google Sheets</b>
-              <p class="help" id="googleEstado">Revisando…</p>
-            </div>
-            <button type="button" class="btn btn-outline btn-sm" id="googleConectar">Conectar Google</button>
-            <button type="button" class="btn btn-ghost btn-sm" id="googleDesconectar" hidden>Desconectar</button>
-          </div>
-        </div>
-        <div class="card">
+        <div class="card" id="conexionCard">
           <h3>Conexión</h3>
           <div class="status-line">
             <span class="pill" id="pill2" data-estado="desconectado">Desconectado</span>
@@ -117,7 +92,7 @@
           </div>
           <div class="seg" role="radiogroup">
             <label><input type="radio" name="conexion.proveedor" value="baileys"><span>WhatsApp (QR)</span></label>
-            <label class="is-disabled"><input type="radio" name="conexion.proveedor" value="meta" disabled><span>API de Meta <em class="tag">Pronto</em></span></label>
+            <label><input type="radio" name="conexion.proveedor" value="meta"><span>API de Meta</span></label>
           </div>
           <p class="help" id="provHelp"></p>
           <div id="qrBoxConexion" class="qr-box" hidden>
@@ -133,12 +108,40 @@
               <label>Phone number ID<input name="conexion.meta.phoneNumberId"></label>
               <label>Verify token<input name="conexion.meta.verifyToken"></label>
             </div>
-            <label>Access token<input name="conexion.meta.accessToken" type="password"></label>
+            <div class="row2">
+              <label>Access token<input name="conexion.meta.accessToken" type="password" autocomplete="off"></label>
+              <label>App secret<input name="conexion.meta.appSecret" type="password" autocomplete="off"></label>
+            </div>
             <label>Webhook<input id="webhookUrl" readonly></label>
           </div>
           <div class="actions">
             <button type="button" class="btn btn-ghost" id="btnLogout" hidden>Desvincular número</button>
           </div>
+        </div>
+        <div class="card">
+          <h3>Configuración</h3>
+          <label class="switch"><input type="checkbox" name="reglas.ignorarGrupos"><span>No responder en grupos</span></label>
+          <div>
+            <label class="switch is-disabled"><input type="checkbox" name="agente.usarLLM" disabled><span>Utilizar LLM <em class="tag">Pronto</em></span></label>
+            <p class="help indent">Cuando ninguna respuesta coincide, genera una con un modelo de lenguaje en lugar del mensaje de "no entendí".</p>
+          </div>
+        </div>
+        <div class="card">
+          <h3>Integraciones</h3>
+          <div class="integracion">
+            <svg viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
+            <div>
+              <b>Google Sheets</b>
+              <p class="help" id="googleEstado">Revisando…</p>
+            </div>
+            <button type="button" class="btn btn-outline btn-sm" id="googleConectar">Conectar Google</button>
+            <button type="button" class="btn btn-ghost btn-sm" id="googleDesconectar" hidden>Desconectar</button>
+          </div>
+        </div>
+        <div class="card">
+          <h3>Seguridad</h3>
+          <p class="help">Si entraste desde una compu que no es tuya o perdiste un dispositivo, cerrá la sesión en todos lados. Los agentes que estén corriendo en otras pestañas se van a detener.</p>
+          <div><button type="button" class="btn btn-outline btn-sm" id="salirTodas">Cerrar sesión en todos los dispositivos</button></div>
         </div>
       </section>
 
@@ -187,6 +190,10 @@
           <p>Planillas de Google Sheets donde escriben las acciones de tus agentes. Están en el Drive de tu cuenta de Google conectada.</p>
         </div>
         <div class="card">
+          <div class="planillas-google" id="planillasGoogle" hidden>
+            <p class="help mal" id="planillasGoogleTexto"></p>
+            <button type="button" class="btn btn-outline btn-sm" id="planillasConectar">Conectar Google</button>
+          </div>
           <div class="planilla-nueva">
             <input id="planillaNombre" placeholder="Nombre de la planilla nueva" aria-label="Nombre de la planilla nueva">
             <button type="button" class="btn btn-primary btn-sm" id="planillaCrear">Crear planilla</button>
@@ -257,7 +264,7 @@
             <svg class="wa-ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20m0 18a8 8 0 1 1 0-16 8 8 0 0 1 0 16m-3.5-9a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3m7 0a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3M12 17.5a5.5 5.5 0 0 0 5.1-3.5H6.9a5.5 5.5 0 0 0 5.1 3.5"/></svg>
             <input id="tInput" placeholder="Mensaje" autocomplete="off">
             <i class="wa-caret" id="tCaret" aria-hidden="true" hidden></i>
-            <svg class="wa-ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M16.5 6v11.5a4 4 0 0 1-8 0V5a2.5 2.5 0 0 1 5 0v10.5a1 1 0 0 1-2 0V6H10v9.5a2.5 2.5 0 0 0 5 0V5a4 4 0 0 0-8 0v12.5a5.5 5.5 0 0 0 11 0V6z"/></svg>
+            <label class="wa-adjuntar" title="Adjuntar un archivo"><input type="file" id="tAdjunto" hidden><svg class="wa-ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M16.5 6v11.5a4 4 0 0 1-8 0V5a2.5 2.5 0 0 1 5 0v10.5a1 1 0 0 1-2 0V6H10v9.5a2.5 2.5 0 0 0 5 0V5a4 4 0 0 0-8 0v12.5a5.5 5.5 0 0 0 11 0V6z"/></svg></label>
           </div>
           <button type="submit" aria-label="Enviar"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M2 21 23 12 2 3v7l15 2-15 2z"/></svg></button>
         </form>

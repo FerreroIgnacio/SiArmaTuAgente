@@ -10,6 +10,8 @@
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css">
 <style>
+  .login-top{position:fixed;inset:0 0 auto 0;height:56px;}
+  @media (max-width:520px){ .login-top .brand-si span{display:none;} }
   .login{min-height:100vh;display:grid;place-items:center;padding:16px;}
   .login .card{width:min(360px,100%);text-align:center;gap:18px;padding:32px 28px;}
   .login .mark{width:48px;height:48px;color:var(--accent);margin:0 auto;}
@@ -22,6 +24,16 @@
 </style>
 </head>
 <body>
+<header class="topbar login-top">
+  <span class="brand">
+    <a class="brand-si" href="https://sisoftwaresolutions.com" target="_blank" rel="noopener" aria-label="Si soluciones en software"><svg class="mark" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="50" cy="50" r="46" stroke="currentColor" stroke-width="5"/>
+      <text x="50" y="66" text-anchor="middle" font-family="Arial, sans-serif" font-weight="800" font-size="48" fill="currentColor">Si</text>
+    </svg><span>Si soluciones en software</span></a>
+    <span class="brand-sep">/</span>
+    <span>Arma tu agente de Whatsapp</span>
+  </span>
+</header>
 <main class="login">
   <div class="card">
     <svg class="mark" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -40,8 +52,6 @@
     <p class="legal-link"><a href="/privacidad.html">Política de privacidad</a></p>
   </div>
 </main>
-<script>
-  if (new URLSearchParams(location.search).has('error')) document.getElementById('error').hidden = false;
-</script>
+<script src="login.js"></script>
 </body>
 </html>

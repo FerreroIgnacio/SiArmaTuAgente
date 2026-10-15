@@ -1,27 +1,16 @@
-import nodemailer from 'nodemailer';
+import { env } from 'cloudflare:workers';
 
-// Mails de las acciones: salen desde una casilla de la plataforma (SMTP en .env), con "responder a" el dueño.
-//   SMTP_HOST, SMTP_PORT (465 = TLS directo), SMTP_USER, SMTP_PASS, SMTP_FROM ("Si Agentes <avisos@…>")
-let transporte = null;
-
-function smtp() {
-  if (transporte) return transporte;
-  const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS } = process.env;
-  if (!SMTP_HOST) throw new Error('El envío de mails no está configurado en el servidor (falta SMTP_HOST en .env)');
-  const port = Number(SMTP_PORT) || 587;
-  transporte = nodemailer.createTransport({
-    host: SMTP_HOST, port, secure: port === 465,
-    auth: SMTP_USER ? { user: SMTP_USER, pass: SMTP_PASS } : undefined,
-  });
-  return transporte;
-}
-
-export async function enviarMail({ para, asunto, cuerpo, responderA }) {
-  await smtp().sendMail({
-    from: process.env.SMTP_FROM || process.env.SMTP_USER,
-    to: para,
+// Mails de las acciones: salen por Cloudflare Email Service (binding EMAIL) desde MAIL_FROM, con "responder a" el dueño.
+// El dominio de MAIL_FROM tiene que estar habilitado: `npx wrangler email sending enable <dominio>`
+//   adjuntos: [{ filename, content (ArrayBuffer), type }] (en total, hasta 5 MiB)
+export async function enviarMail({ para, asunto, cuerpo, adjuntos = [], responderA }) {
+  if (!env.EMAIL || !env.MAIL_FROM) throw new Error('El envío de mails no está configurado en el servidor');
+  await env.EMAIL.send({
+    from: env.MAIL_FROM,
+    to: para.split(/[,;]/).map(s => s.trim()).filter(Boolean),
     replyTo: responderA || undefined,
     subject: asunto,
     text: cuerpo,
+    attachments: adjuntos.map(a => ({ ...a, disposition: 'attachment' })),
   });
 }

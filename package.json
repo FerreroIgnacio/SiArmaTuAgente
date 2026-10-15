@@ -2,57 +2,26 @@
   "name": "si-arma-tu-agente",
   "version": "1.0.0",
   "scripts": {
-    "start": "node --env-file-if-exists=.env src/server.js",
-    "dev": "node --env-file-if-exists=.env --watch src/server.js",
-    "local": "electron .",
-    "build:local": "electron-builder --linux --win --x64"
+    "dev": "npm run build:web && wrangler dev",
+    "deploy": "npm run build:web && wrangler deploy",
+    "db:schema": "wrangler d1 execute siarma --remote --file schema.sql",
+    "build:web": "node web/build.mjs"
   },
   "type": "module",
   "dependencies": {
     "baileys": "^7.0.0-rc14",
-    "express": "^5.3.0",
-    "nodemailer": "^10.1.0",
     "pino": "^10.4.0",
     "qrcode": "^1.5.4"
   },
-  "engines": {
-    "node": ">=20"
-  },
   "devDependencies": {
-    "electron": "^44.7.1",
-    "electron-builder": "^26.15.3"
+    "esbuild": "^0.28.2",
+    "esbuild-plugins-node-modules-polyfill": "^1.8.3",
+    "memfs": "^4.80.0",
+    "wrangler": "^4.151.0"
   },
   "description": "Si · Armá tu agente",
   "author": "Si Software Solutions",
-  "main": "src/desktop/main.js",
-  "build": {
-    "appId": "com.sisoftwaresolutions.agente",
-    "productName": "SiAgente",
-    "directories": {
-      "output": "dist",
-      "buildResources": "build"
-    },
-    "files": [
-      "src/**",
-      "public/local.html",
-      "public/styles.css",
-      "build/icon.png",
-      "package.json",
-      "!node_modules/sharp/**",
-      "!node_modules/@img/**"
-    ],
-    "npmRebuild": false,
-    "artifactName": "si-agente-${os}-${arch}.${ext}",
-    "linux": {
-      "target": "AppImage",
-      "category": "Office",
-      "icon": "build/icon.png",
-      "artifactName": "si-agente-linux-x64.${ext}"
-    },
-    "win": {
-      "target": "portable",
-      "icon": "build/icon.png",
-      "signAndEditExecutable": false
-    }
+  "allowScripts": {
+    "workerd@1.20261012.1": true
   }
 }
