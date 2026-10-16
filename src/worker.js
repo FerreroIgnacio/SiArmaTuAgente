@@ -4,7 +4,8 @@ import { borrarCharlasVencidas, olvidarChat, responder, resumenMensaje } from '.
 import { charlasHoy, registrar, resumen as resumenMetricas } from './metricas.js';
 import { rutasAuth, usuario } from './auth.js';
 import { ejecutar, interpolar, variables } from './acciones.js';
-import { borrarPlanilla, crearPlanilla, desconectarGoogle, estadoGoogle, hojasDe, idPlanilla, listarPlanillas, tokenDe, vistaPrevia } from './google.js';
+import { desconectarGoogle, estadoGoogle, idPlanilla, tokenDe } from './google.js';
+import { asegurarPlanilla, borrarPlanilla, crearPlanilla, hojasDe, listarPlanillas, sincronizarDrive, vistaPrevia } from './planillas.js';
 import { SEGURIDAD, json, redirigir } from './http.js';
 import plantilla from './plantilla.json';
 import { cifrar } from './cifrado.js';
@@ -65,13 +66,31 @@ ruta('GET', '/api/bots', async ({ yo }) => json(await Promise.all((await botsDe(
 
 // Cada cuenta arranca con el agente de ejemplo (src/plantilla.json, archivos en public/plantilla/).
 // Los mails de sus acciones van al dueño; las planillas las elige él
+// Copia del agente de ejemplo para este dueño: los mails le llegan a él y las planillas usan la primera que creó
+async function ejemploPara(yo) {
+  const ejemplo = structuredClone(plantilla);
+  await asegurarPlanilla(yo.sub).catch(() => {});
+  const planilla = await listarPlanillas(yo.sub).then(ps => ps.sort((a, b) => String(a.creada).localeCompare(b.creada))[0]?.url || '', () => '');
+  for (const n of ejemplo.flujo.nodos) {
+    if (n.accion?.tipo === 'mail') n.accion.para = yo.email;
+    if (n.accion?.tipo === 'sheets' && !n.accion.planilla) n.accion.planilla = planilla;
+  }
+  return ejemplo;
+}
+
 ruta('POST', '/api/bots', async ({ yo, body }) => {
   if ((await botsDe(yo.sub)).length) return json({ error: 'Cada cuenta tiene un solo agente' }, 409);
-  const ejemplo = structuredClone(plantilla);
-  for (const n of ejemplo.flujo.nodos) if (n.accion?.tipo === 'mail') n.accion.para = yo.email;
+  const ejemplo = await ejemploPara(yo);
   const datos = validar(body || {});
   return json(botPublico(await saveBot(null, { ...ejemplo, ...datos, agente: { ...ejemplo.agente, ...datos.agente } }, yo)), 201);
 });
+
+// Vuelve el agente (mensajes, flujo y reglas) al de ejemplo; conserva el negocio y la conexión
+ruta('POST', '/api/bots/:id/restaurar', async ({ bot, yo }) => {
+  const ejemplo = await ejemploPara(yo);
+  const nuevo = await saveBot(bot.id, { agente: ejemplo.agente, flujo: ejemplo.flujo, reglas: ejemplo.reglas }, yo);
+  return json({ ...botPublico(nuevo), estado: estadoDe(nuevo) });
+}, { bot: true });
 
 ruta('GET', '/api/bots/:id', ({ bot }) => json({ ...botPublico(bot), estado: estadoDe(bot) }), { bot: true });
 ruta('PUT', '/api/bots/:id', async ({ bot, yo, body }) => {
@@ -159,6 +178,7 @@ ruta('GET', '/api/bots/:id/metricas', async ({ bot }) => json(await resumenMetri
 // Planillas del dueño para las acciones de Sheets (con drive.file la app solo ve y escribe las que crea).
 // Cada una con cuántas acciones de Sheets (de todos los agentes del dueño) la usan
 ruta('GET', '/api/planillas', async ({ yo }) => {
+  await asegurarPlanilla(yo.sub);
   const usos = {};
   for (const b of await botsDe(yo.sub)) {
     for (const n of b.flujo?.nodos || []) {
@@ -174,6 +194,7 @@ ruta('POST', '/api/planillas', async ({ yo, body = {} }) => {
   const encabezados = (body.encabezados || []).map(String).slice(0, 26);
   return json(await crearPlanilla(yo.sub, { titulo: String(body.titulo || 'Registros del agente').slice(0, 120), encabezados }), 201);
 });
+ruta('POST', '/api/planillas/:id/sincronizar', async ({ yo, params }) => json(await sincronizarDrive(yo.sub, params.id)));
 ruta('DELETE', '/api/planillas/:id', async ({ yo, params }) => { await borrarPlanilla(yo.sub, params.id); return json({ ok: true }); });
 ruta('GET', '/api/planillas/:id/hojas', async ({ yo, params }) => json(await hojasDe(yo.sub, params.id)));
 ruta('GET', '/api/planillas/:id/preview', async ({ yo, params, url }) => json(await vistaPrevia(yo.sub, params.id, url.searchParams.get('hoja'))));
@@ -231,6 +252,7 @@ export default {
     // Assets sirve cada página .html sin la extensión (/ayuda-variables)
     if (p === '/ayuda/variables') return pagina(req, '/ayuda-variables');
     if (p === '/ayuda/api-meta') return pagina(req, '/ayuda-api-meta');
+    if (p === '/ayuda/como-usar') return pagina(req, '/ayuda-como-usar');
     return env.ASSETS.fetch(req);
   },
 
@@ -240,4 +262,3 @@ export default {
     await borrarCharlasVencidas();
   },
 };
-    if (p === '/ayuda/como-usar') return pagina(req, '/ayuda-como-usar');

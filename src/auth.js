@@ -1,7 +1,7 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { env } from 'cloudflare:workers';
 import { db } from './store.js';
-import { SCOPES_INTEGRACION, asegurarPlanilla, guardarCuenta } from './google.js';
+import { SCOPES_INTEGRACION, guardarCuenta } from './google.js';
 import { cookies, json, redirigir, setCookie } from './http.js';
 
 // Login con Google (OAuth 2.0, flujo de código en el servidor).
@@ -50,14 +50,14 @@ function autorizar({ proposito, scope, extra }) {
 export async function rutasAuth(req, url) {
   const ruta = `${req.method} ${url.pathname}`;
 
-  // El login ya pide los permisos de Drive/Sheets (drive.file) para las acciones
+  // El login pide solo la identidad: una pantalla, sin permisos de Drive (la sincronización con Drive es opcional)
   if (ruta === 'GET /auth/google') return autorizar({
     proposito: 'login',
-    scope: ['openid', 'email', 'profile', ...SCOPES_INTEGRACION].join(' '),
-    extra: { prompt: 'select_account', access_type: 'offline', include_granted_scopes: 'true' },
+    scope: 'openid email profile',
+    extra: { prompt: 'select_account' },
   });
 
-  // Permisos para las acciones: archivos y planillas en el Drive del dueño
+  // Sincronizar planillas con el Drive del dueño (opcional)
   if (ruta === 'GET /auth/google/conectar') {
     const yo = await usuario(req);
     if (!yo) return redirigir('/login.html');
@@ -89,10 +89,14 @@ export async function rutasAuth(req, url) {
       if (conectando) {
         const yo = await usuario(req);
         if (!yo) return redirigir('/login.html', [borrarState]);
+        // Google deja destildar el permiso: sin drive.file no sirve, se revoca y se avisa
+        if (!String(data.scope || '').includes('drive.file')) {
+          await fetch(`https://oauth2.googleapis.com/revoke?token=${encodeURIComponent(data.access_token)}`, { method: 'POST' }).catch(() => {});
+          return redirigir(fallo, [borrarState]);
+        }
         const about = await fetch('https://www.googleapis.com/drive/v3/about?fields=user(emailAddress)', { headers: { Authorization: `Bearer ${data.access_token}` } })
           .then(x => x.ok ? x.json() : null).catch(() => null);
         await guardarCuenta(yo.sub, { refresh_token: data.refresh_token, email: about?.user?.emailAddress || yo.email, scope: data.scope });
-        await asegurarPlanilla(yo.sub);
         return redirigir(`/?google=ok#${volver}`, [borrarState]);
       }
       // El id_token viene directo de Google por TLS: alcanza con decodificarlo
@@ -101,13 +105,6 @@ export async function rutasAuth(req, url) {
       if (!permitido(p.email)) return redirigir('/login.html?error=permiso', [borrarState]);
       const sesion = sellar({ sub: p.sub, email: p.email, nombre: p.name, foto: p.picture, ver: await version(p.sub), exp: Date.now() + DURACION });
       const cookieSesion = setCookie('sesion', sesion, DURACION / 1000);
-      // Google solo manda el refresh token la primera vez: si no vino y no hay uno guardado, se pide el permiso de nuevo
-      try {
-        await guardarCuenta(p.sub, { refresh_token: data.refresh_token, email: p.email, scope: data.scope });
-      } catch {
-        return redirigir('/auth/google/conectar', [borrarState, cookieSesion]);
-      }
-      await asegurarPlanilla(p.sub);
       return redirigir('/', [borrarState, cookieSesion]);
     } catch (err) {
       console.error('Google OAuth:', err.message);

@@ -309,7 +309,7 @@ async function turno(bot, chat, chatId, texto, cliente, { avanzar = null, adjunt
     chat.reinicia = chat.ultimo + (auto?.espera ?? 0) * 1000;
     const despedida = interpolar(bot.agente.despedida, vars).trim();
     if (despedida) {
-      mensajes.push({ tipo: 'texto', texto: despedida });
+      mensajes.push({ tipo: 'texto', texto: despedida, despedida: true });
       chat.historial.push({ role: 'assistant', content: despedida });
     }
   }

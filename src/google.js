@@ -68,7 +68,11 @@ export async function tokenDe(sub, { conVencimiento = false } = {}) {
     }),
   });
   const data = await r.json();
-  if (!r.ok) throw new Error(`Google: ${data.error_description || data.error}. Volvé a conectar la cuenta.`);
+  if (!r.ok) {
+    // Token vencido o revocado: se olvida la cuenta para que se pueda volver a conectar
+    if (data.error === 'invalid_grant') await db().prepare('DELETE FROM google WHERE sub = ?').bind(String(sub)).run();
+    throw new Error(`Google: ${data.error_description || data.error}. Volvé a conectar la cuenta.`);
+  }
   const acceso = { token: data.access_token, vence: Date.now() + data.expires_in * 1000 };
   accesos.set(sub, acceso);
   return conVencimiento ? acceso : acceso.token;
@@ -109,7 +113,7 @@ export async function subirArchivo(sub, datos, tipo, nombre) {
 // Acepta el link completo de la planilla o solo su id
 export const idPlanilla = s => String(s || '').match(/\/d\/([\w-]+)/)?.[1] || String(s || '').trim();
 
-const letraANumero = l => [...l.toUpperCase()].reduce((n, c) => n * 26 + c.charCodeAt(0) - 64, 0);
+export const letraANumero = l => [...l.toUpperCase()].reduce((n, c) => n * 26 + c.charCodeAt(0) - 64, 0);
 const numeroALetra = n => { let s = ''; for (; n > 0; n = Math.floor((n - 1) / 26)) s = String.fromCharCode(65 + ((n - 1) % 26)) + s; return s; };
 const rango = (hoja, r) => encodeURIComponent(hoja ? `'${hoja.replace(/'/g, "''")}'!${r}` : r);
 const base = id => `https://sheets.googleapis.com/v4/spreadsheets/${id}`;
@@ -127,6 +131,11 @@ export async function crearPlanilla(sub, { titulo, encabezados = [] }) {
   return { id: f.id, url: f.webViewLink || `https://docs.google.com/spreadsheets/d/${f.id}/edit`, hoja };
 }
 
+// Escribe una tabla de valores desde A1 (sincronización de una planilla local)
+export async function escribirValores(sub, planilla, hoja, values) {
+  await api(sub, 'PUT', `${base(idPlanilla(planilla))}/values/${rango(hoja, 'A1')}?valueInputOption=RAW`, { values });
+}
+
 // Manda la planilla a la papelera del Drive del dueño (se puede recuperar desde Drive)
 export async function borrarPlanilla(sub, planilla) {
   await api(sub, 'PATCH', `https://www.googleapis.com/drive/v3/files/${idPlanilla(planilla)}`, { trashed: true });
@@ -139,18 +148,10 @@ export async function listarPlanillas(sub) {
     q: "mimeType='application/vnd.google-apps.spreadsheet' and trashed=false",
     orderBy: 'modifiedTime desc',
     pageSize: '100',
-    fields: 'files(id,name,webViewLink,modifiedTime)',
+    fields: 'files(id,name,webViewLink,modifiedTime,createdTime)',
   });
   const { files = [] } = await api(sub, 'GET', `https://www.googleapis.com/drive/v3/files?${q}`);
-  return files.map(f => ({ id: f.id, nombre: f.name, url: f.webViewLink, modificada: f.modifiedTime }));
-}
-
-// Si el dueño no tiene ninguna planilla (o no dio el permiso), se le crea una por defecto. No frena el login si falla
-export async function asegurarPlanilla(sub) {
-  try {
-    if (!(await estadoGoogle(sub)).sheets) return;
-    if (!(await listarPlanillas(sub)).length) await crearPlanilla(sub, { titulo: 'Registros del agente' });
-  } catch (err) { console.error('Planilla por defecto:', err.message); }
+  return files.map(f => ({ id: f.id, nombre: f.name, url: f.webViewLink, modificada: f.modifiedTime, creada: f.createdTime }));
 }
 
 export async function hojasDe(sub, planilla) {

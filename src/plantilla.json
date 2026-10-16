@@ -56,7 +56,7 @@
     "formatoOpciones": "lista",
     "pos": {
      "x": 0,
-     "y": 350
+     "y": 340
     }
    },
    {
@@ -291,7 +291,7 @@
     "formatoOpciones": "lista",
     "pos": {
      "x": 320,
-     "y": 350
+     "y": 340
     },
     "guardarEn": "foto",
     "numerico": "imagen",
@@ -318,7 +318,7 @@
     "formatoOpciones": "lista",
     "pos": {
      "x": 640,
-     "y": 350
+     "y": 340
     },
     "timed": true,
     "espera": 1
@@ -329,7 +329,7 @@
     "nombre": "Avisar por mail",
     "pos": {
      "x": 960,
-     "y": 350
+     "y": 340
     },
     "accion": {
      "id": "91aa195e-5f8c-449d-b026-c706df38d744",
@@ -385,8 +385,8 @@
     "tipo": "accion",
     "nombre": "Avisar al dueño",
     "pos": {
-     "x": 1920,
-     "y": 350
+     "x": 1600,
+     "y": 340
     },
     "accion": {
      "id": "e2a4c6f8-3b5d-4e7f-9a1c-6d8f0b2e4a73",

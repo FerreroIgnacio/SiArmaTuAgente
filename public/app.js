@@ -582,7 +582,6 @@ function erroresAccion(a) {
       si(!a.texto?.trim(), 'Falta el mensaje');
       break;
     case 'sheets':
-      si(googleInfo && !(googleInfo.conectado && googleInfo.sheets), 'Faltan permisos de Google: cerrá sesión y volvé a ingresar');
       si(!a.planilla, 'Falta elegir la planilla');
       si(!(a.columnas || []).some(c => c.columna), 'Faltan las columnas');
       si(a.modo === 'actualizar' && !a.buscarColumna, 'Falta la columna donde buscar');
@@ -638,14 +637,14 @@ function renderArbol() {
         esAccion ? el('span', { class: `port out cero${nodo(cero?.destino) ? '' : ' apagado'}`, 'data-salida': cero?.id || CERO, title: 'Después de la acción sigue acá: arrastrá hasta otra acción o estado' })
         : terminal(n) ? null : el('span', { class: `port out cero${n.timed && nodo(cero?.destino) ? animTapa(n.id) : ' apagado'}`, 'data-salida': cero?.id || CERO,
           title: n.timed ? 'Salida por tiempo: arrastrá hasta un estado para conectar' : 'Salida por tiempo (se usa solo si el estado es por tiempo)' })),
-      salidas.length ? el('ul', { class: 'fsal' }, ...salidas.map(s => el('li', {
+      salidas.length || !esRaiz && !terminal(n) && !n.timed ? el('ul', { class: 'fsal' }, ...salidas.map(s => el('li', {
         class: `${nodo(s.destino) ? '' : 'libre'}${dups.has(s.id) ? ' tapada' : ''}${n.timed ? ' off' + animTapa(n.id) : ''}`, 'data-salida': s.id,
         title: dups.has(s.id) ? `Apagada: una respuesta anterior ya escucha "${dups.get(s.id)}"` : '' },
         s.numero ? el('span', { class: 'cualquiera' }, `${pideArchivo(n) ? '📎' : '#'} ${TIPOS_RESPUESTA[n.numerico] || 'Número entero'}`)
         : el('span', { class: s.texto ? '' : 'vacio' }, s.texto || 'Sin texto'),
         el('span', { class: `port out${!nodo(s.destino) || !n.timed && !escucha(s) ? ' apagado' : ''}`, 'data-salida': s.id, title: 'Arrastrá hasta un estado para conectar' }))),
         // "0. Menú" lo agrega el bot solo: se muestra fijo, sin conexión
-        !esRaiz && !n.numerico && !n.timed ? el('li', { class: 'fija', title: 'Automática: vuelve al primer mensaje' }, el('span', {}, 'Menú')) : null,
+        !esRaiz && !n.timed ? el('li', { class: 'fija', title: n.numerico ? 'Escribiendo "menú" vuelve al primer mensaje' : 'Automática: vuelve al primer mensaje' }, el('span', {}, 'Menú')) : null,
         n.timed ? tapaReloj(0, animTapa(n.id)) : null) : null);
     div.style.left = `${n.pos.x}px`;
     div.style.top = `${n.pos.y}px`;
@@ -811,6 +810,8 @@ function renderArbol() {
   $('#zoomOut').onclick = () => zoom(1 / 1.2);
   $('#flowFit').onclick = ajustar;
   $('#flowNuevo').onclick = () => agregarNodo('estado');
+  $('#flowRestaurar').innerHTML = `${ICONO_TACHO} Restaurar`;
+  $('#flowRestaurar').onclick = restaurarAgente;
   $('#flowNuevaAccion').onclick = () => agregarNodo('accion');
   $('#flowNuevoSalto').onclick = () => agregarNodo('salto');
 })();
@@ -1037,7 +1038,7 @@ function camposAccion(a, rehacer) {
         a.hoja = '';
         rehacer();
       } },
-        el('option', { value: '' }, lista ? 'Elegí una planilla…' : planillasError ? 'Sin acceso a Google' : 'Cargando planillas…'),
+        el('option', { value: '' }, lista ? 'Elegí una planilla…' : planillasError ? 'Sin acceso a las planillas' : 'Cargando planillas…'),
         ...(lista || []).map(p => el('option', { value: p.id }, p.nombre)),
         idActual && !lista?.some(p => p.id === idActual) ? el('option', { value: idActual }, 'Planilla sin acceso: elegí otra') : null,
         lista ? el('option', { value: '__nueva' }, '+ Crear planilla nueva') : null);
@@ -1057,9 +1058,9 @@ function camposAccion(a, rehacer) {
       return [
         el('label', {}, 'Planilla', selPlanilla),
         el('div', { class: 'accion-probar' },
-          a.planilla ? el('a', { href: a.planilla, target: '_blank', rel: 'noopener', class: 'link-planilla' }, 'Abrir planilla ↗') : null,
+          lista?.find(p => p.id === idActual)?.enlace ? el('a', { href: lista.find(p => p.id === idActual).enlace, target: '_blank', rel: 'noopener', class: 'link-planilla' }, 'Abrir en Drive ↗') : null,
           estadoPlanilla),
-        el('small', { class: 'help' }, 'Las planillas están en el Drive de tu cuenta de Google conectada; las ves todas en la pestaña Planillas. Por seguridad, el agente solo puede escribir en planillas creadas desde acá.'),
+        el('small', { class: 'help' }, 'Las planillas se guardan en la app; las ves y las sincronizás con tu Google Drive desde la pestaña Planillas.'),
         el('div', { class: 'row2' }, el('label', {}, 'Hoja', selHoja), el('label', {}, 'Qué hace', modo)),
         a.modo === 'actualizar' ? el('div', { class: 'row2' },
           campo('Buscar en la columna', a, 'buscarColumna', { placeholder: 'C', maxLength: 2 }),
@@ -1084,7 +1085,7 @@ let planillasCache = null; // [{ id, nombre, url, modificada }]
 let planillasError = '';
 let planillasCargando = null;
 const hojasCache = new Map();
-const idDeLink = s => String(s || '').match(/\/d\/([\w-]+)/)?.[1] || '';
+const idDeLink = s => String(s || '').match(/\/d\/([\w-]+)/)?.[1] || (/^loc_\w+$/.test(s) ? s : '');
 const mensajeGoogle = err => /no está conectada/.test(err.message) ? 'Faltan los permisos de Google: cerrá sesión y volvé a ingresar.' : err.message;
 
 function cargarPlanillas(forzar = false) {
@@ -1144,6 +1145,38 @@ function vistaPlanilla(p) {
   return caja;
 }
 
+let avisoDrive = '';
+
+// Sin Drive conectado se pide el permiso (y al volver se sincroniza); con Drive conectado se sincronizan las que faltan
+async function sincronizarPlanillas() {
+  const estado = $('#planillasEstado');
+  try {
+    await guardarPendiente();
+    if (!(googleInfo?.conectado && googleInfo.sheets)) {
+      try { sessionStorage.setItem('sincronizar', '1'); } catch {}
+      location.href = '/auth/google/conectar?volver=planillas';
+      return;
+    }
+    estado.className = 'help';
+    estado.textContent = 'Sincronizando…';
+    await sincronizarPendientes();
+    await pintarPlanillas();
+  } catch (err) {
+    // Token vencido: el servidor ya lo olvidó, se vuelve a pedir el permiso
+    if (/Volvé a conectar/.test(err.message)) {
+      try { sessionStorage.setItem('sincronizar', '1'); } catch {}
+      location.href = '/auth/google/conectar?volver=planillas';
+      return;
+    }
+    estado.className = 'help mal';
+    estado.textContent = mensajeGoogle(err);
+  }
+}
+const sincronizarPendientes = async () => {
+  for (const p of await cargarPlanillas(true)) if (p.local && !p.sincronizada) await api('POST', `/api/planillas/${p.id}/sincronizar`);
+};
+$('#planillasSincronizar').onclick = sincronizarPlanillas;
+
 async function pintarPlanillas() {
   const lista = $('#planillasLista'), estado = $('#planillasEstado');
   estado.className = 'help';
@@ -1152,7 +1185,10 @@ async function pintarPlanillas() {
     await guardarPendiente();
     const ps = await cargarPlanillas(true);
     $('#planillaNombre').placeholder = `Nombre (si lo dejás vacío: ${nombrePlanillaNueva()})`;
-    estado.textContent = ps.length ? '' : 'Todavía no hay planillas. Creá una acá o desde una acción de Sheets.';
+    estado.textContent = avisoDrive || (ps.length ? '' : 'Todavía no hay planillas. Creá una acá o desde una acción de Sheets.');
+    if (avisoDrive) estado.className = 'help mal';
+    avisoDrive = '';
+    $('#planillasSync').hidden = !ps.some(p => p.local && !p.sincronizada);
     const fecha = f => new Date(f).toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' });
     lista.replaceChildren(...ps.map(p => el('li', {},
       el('div', {}, el('b', {}, p.nombre),
@@ -1160,12 +1196,42 @@ async function pintarPlanillas() {
           el('span', { class: p.acciones ? 'uso' : 'sin-uso' }, p.acciones
             ? `Referenciada por ${p.acciones} ${p.acciones === 1 ? 'acción' : 'acciones'} (${p.agentes.join(', ')})`
             : 'Sin acciones que la usen'))),
-      el('a', { href: p.url, target: '_blank', rel: 'noopener', class: 'btn btn-outline btn-sm' }, 'Abrir ↗'),
+      p.enlace ? el('a', { href: p.enlace, target: '_blank', rel: 'noopener', class: 'btn btn-outline btn-sm' }, 'Abrir en Drive ↗') : null,
       el('button', { type: 'button', class: 'btn btn-ghost btn-sm btn-danger', onclick: () => borrarPlanilla(p) }, 'Borrar'), vistaPlanilla(p))));
   } catch {
     estado.className = 'help mal';
     estado.textContent = planillasError;
     lista.replaceChildren();
+  }
+}
+
+function confirmarRestaurar() {
+  return new Promise(resolve => {
+    const dlg = el('dialog', { class: 'confirmar' },
+      el('form', { method: 'dialog', class: 'card' },
+        el('h3', {}, 'Restaurar agente'),
+        el('p', { class: 'confirmar-aviso' }, 'Se va a restaurar el agente a la configuración por defecto: se pierden los estados, acciones y respuestas que armaste, y vuelve el agente de ejemplo.'),
+        el('div', { class: 'confirmar-botones' },
+          el('button', { type: 'button', class: 'btn btn-outline', onclick: () => dlg.close() }, 'Cancelar'),
+          el('button', { type: 'submit', class: 'btn btn-danger-solid' }, 'Restaurar'))));
+    dlg.addEventListener('submit', () => { dlg.returnValue = 'ok'; });
+    dlg.addEventListener('close', () => { resolve(dlg.returnValue === 'ok'); dlg.remove(); });
+    dlg.addEventListener('click', e => { if (e.target === dlg) dlg.close(); });
+    document.body.append(dlg);
+    dlg.showModal();
+  });
+}
+
+async function restaurarAgente() {
+  if (!await confirmarRestaurar()) return;
+  try {
+    clearTimeout(timerGuardado);
+    await guardando;
+    seleccionado = null;
+    llenarForm(await api('POST', `/api/bots/${botId}/restaurar`));
+    $('#saved').textContent = 'Guardado';
+  } catch (err) {
+    $('#saved').textContent = `No se pudo restaurar: ${err.message}`;
   }
 }
 
@@ -1177,7 +1243,7 @@ function confirmarBorrado(p) {
     const dlg = el('dialog', { class: 'confirmar' },
       el('form', { method: 'dialog', class: 'card' },
         el('h3', {}, 'Borrar planilla'),
-        el('p', {}, 'Vas a mandar ', el('b', {}, p.nombre), ' a la papelera de tu Google Drive.'),
+        el('p', {}, 'Vas a mandar ', el('b', {}, p.nombre), p.sincronizada ? ' de la app. La copia en tu Google Drive no se borra.' : p.local ? ' de la app.' : ' a la papelera de tu Google Drive.'),
         p.acciones ? el('p', { class: 'confirmar-aviso' }, `La usan ${p.acciones} ${p.acciones === 1 ? 'acción' : 'acciones'} (${p.agentes.join(', ')}): van a dejar de funcionar.`) : null,
         el('label', {}, el('span', {}, 'Escribí ', el('code', {}, p.nombre), ' para confirmar'), input),
         el('div', { class: 'confirmar-botones' },
@@ -1969,8 +2035,9 @@ function reiniciarChat(avisarServer = true) {
 
 // Muestra la respuesta del servidor; si el estado no escucha, espera y pasa solo al siguiente resaltando el estado de a poco
 function pintarRespuesta(res) {
-  res.mensajes.forEach(mostrarMensaje);
+  res.mensajes.filter(m => !m.despedida).forEach(mostrarMensaje);
   (res.acciones || []).forEach(a => burbuja(`accion${a.ok ? '' : ' fallo'}`, `${a.ok ? '⚙' : '⚠'} ${a.detalle}`));
+  res.mensajes.filter(m => m.despedida).forEach(mostrarMensaje);
   estadoPrueba = res.respuestaId || res.nodoActual;
   renderArbol();
   if (!res.auto) return;
@@ -2040,7 +2107,7 @@ async function enviarPrueba(datos) {
     else {
       enviarPendientes(res).catch(err => console.error('WhatsApp de acción', err));
       pintarRespuesta(res);
-      chat.append(el('div', { class: 'fuente' }, ...etiquetaFuente(res)));
+      if (res.fuente !== 'opcion' && res.fuente !== 'no_numero') chat.append(el('div', { class: 'fuente' }, ...etiquetaFuente(res)));
     }
   } catch (err) {
     esperando.className = 'msg bot';
@@ -2082,8 +2149,6 @@ $('#salirTodas').onclick = salir(true);
 async function pintarGoogle(error = '') {
   const g = await api('GET', '/api/google').catch(() => ({ conectado: false }));
   googleInfo = g;
-  // Con permisos pero sin planillas (se borraron todas), se crea una por defecto
-  if (g.conectado && g.sheets) await cargarPlanillas(true).then(ps => ps.length || crearPlanilla('Registros del agente')).catch(() => {});
   renderArbol();
   // Al conectar o desconectar Google cambian las planillas disponibles
   planillasCache = null;
@@ -2101,7 +2166,11 @@ async function iniciar() {
   const id = bots.find(b => b.id === pedido)?.id || bots[0]?.id;
   const google = new URLSearchParams(location.search).get('google');
   if (location.search) history.replaceState(null, '', location.pathname + location.hash);
-  pintarGoogle(google === 'error' ? 'No se pudo conectar la cuenta de Google. Probá de nuevo.' : '');
+  if (google === 'error') avisoDrive = 'No se pudo conectar Drive: tildá el permiso de Drive en la pantalla de Google y probá de nuevo.';
+  let porSincronizar = false;
+  try { porSincronizar = !!sessionStorage.getItem('sincronizar'); sessionStorage.removeItem('sincronizar'); } catch {}
+  await pintarGoogle();
+  if (google === 'ok' && porSincronizar) await sincronizarPendientes().catch(err => { avisoDrive = mensajeGoogle(err); });
   const sec = location.hash.slice(1);
   mostrarSeccion(sec);
   // Con una sección en la URL se vuelve al agente en el que estaba; si no, arranca en el inicio

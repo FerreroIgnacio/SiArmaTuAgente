@@ -1,4 +1,5 @@
-import { actualizarFila, agregarFila, bajarArchivo } from './google.js';
+import { bajarArchivo } from './google.js';
+import { actualizarFila, agregarFila } from './planillas.js';
 import { enviarMail } from './mail.js';
 
 // Acciones de un estado: se ejecutan al entrar, después de mandar sus mensajes.
