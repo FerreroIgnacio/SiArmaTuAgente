@@ -1,5 +1,16 @@
+import { env } from 'cloudflare:workers';
+
 // Ayudas para armar respuestas en el Worker
+// CSP de las páginas: igual que la de public/_headers
+const CSP = [
+  "default-src 'self'", "script-src 'self'", "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+  'font-src https://fonts.gstatic.com', "img-src 'self' data: blob: https:", "media-src 'self' data: blob: https:",
+  "connect-src 'self' https: wss://*.whatsapp.com", "worker-src 'self'", "object-src 'none'", "base-uri 'self'",
+  "form-action 'self'", 'frame-src https://sisoftwaresolutions.com', "frame-ancestors 'none'",
+].join('; ');
+
 export const SEGURIDAD = {
+  'Content-Security-Policy': CSP,
   'X-Frame-Options': 'DENY',
   'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'strict-origin-when-cross-origin',
@@ -26,3 +37,7 @@ export function cookies(req) {
     try { return [c.slice(0, i), decodeURIComponent(c.slice(i + 1))]; } catch { return [c.slice(0, i), '']; }
   }));
 }
+
+// Límites de pedidos (bindings `ratelimits` de wrangler.jsonc). Sin el binding no limita
+export const dentroDelLimite = async (limite, key) => !env[limite] || (await env[limite].limit({ key })).success;
+export const demasiados = () => json({ error: 'Demasiados pedidos seguidos, esperá un momento' }, 429);

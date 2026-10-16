@@ -180,7 +180,7 @@ function mensajesDe(nodo, nodos, { esRaiz, vars, archivos }) {
 
 const resumen = m => m.tipo === 'texto' ? m.texto : m.tipo === 'encuesta' ? `${m.texto}\n${m.opciones.map(o => `- ${o}`).join('\n')}` : `[${m.tipo}] ${m.texto || m.nombre || m.nombreArchivo || ''}`.trim();
 
-// Devuelve { mensajes: [...], acciones, vars, fuente, respuestaId }
+// Devuelve { mensajes: [...], acciones, vars, fuente, respuestaId, nueva } (nueva: primer mensaje de la charla)
 //   fuente: 'inicio' | 'opcion' | 'llm' | 'sin_coincidencia' | 'no_numero'
 //   cliente: { nombre, telefono } para las variables {nombre} y {telefono}
 //   adjunto: { tipo, nombreArchivo?, url?, link?, bajar? } lo que mandó además del texto; url es 'drive:<id>' | 'local:<id>'
@@ -320,7 +320,7 @@ async function turno(bot, chat, chatId, texto, cliente, { avanzar = null, adjunt
 
   const nombre = id => { const n = nodos.get(id); return n ? n.nombre || n.id : id; };
   console.log(`[${bot.id}] ${cliente.nombre || chatId}: "${texto ?? ''}" ${nombre(actual.id)} → ${destino ? nombre(destino.id) : '-'} (${fuente}) pila=[${chat.menus.map(nombre).join(' > ')}] vars=${JSON.stringify(chat.vars)}`);
-  return { mensajes, acciones, vars, archivos: chat.archivos, fuente, respuestaId: destino?.id || null, nodoActual: chat.menus.at(-1), auto };
+  return { mensajes, acciones, vars, archivos: chat.archivos, fuente, respuestaId: destino?.id || null, nodoActual: chat.menus.at(-1), auto, nueva: primerMensaje && !avanzar };
 }
 
 export { resumen as resumenMensaje };

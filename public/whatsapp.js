@@ -6,9 +6,9 @@ import { bajarArchivo, subirADrive } from './drive.js';
 //   alEstado(s)    → mismo formato que el estado del servidor ({ estado, qr?, numero?, detalle?, proveedor })
 //   alMensaje(m)   → { chatId, nombre, texto, adjunto?, de, fuente?, ts } para el registro de conversaciones
 //   alFoto(chatId, url) → foto de perfil del contacto
-//   alMetricas()   → cambió algo en las métricas
 //   alMedia(id)    → el worker guardó el archivo de un adjunto (adjunto.id) en IndexedDB 'adjuntos'
-export function crearWhatsApp({ botId, api, alEstado, alMensaje, alFoto, alMetricas, alMedia }) {
+//   claveLocal     → hex de /api/yo: el worker cifra con ella la sesión que guarda en IndexedDB
+export function crearWhatsApp({ botId, claveLocal, api, alEstado, alMensaje, alFoto, alMedia }) {
   let worker = null, liberar = null, estado = { estado: 'desconectado' }, cerrado = false, quiere = false, pedido = false;
   let siguiente = 0;
   const pendientes = new Map();
@@ -94,7 +94,6 @@ export function crearWhatsApp({ botId, api, alEstado, alMensaje, alFoto, alMetri
     }
     for (const w of t.whatsapp) await enviar(w.jid, w.mensaje).catch(err => console.error('WhatsApp de acción', err));
     for (const r of t.registro) alMensaje({ chatId, nombre, texto: r, de: 'bot', fuente: 'accion', ts: Date.now() });
-    alMetricas();
     if (t.auto?.destino) {
       await esperar(t.auto.espera * 1000);
       if (!cerrado) await turno({ chatId, from, nombre, texto: null }, t.auto.destino);
@@ -114,7 +113,7 @@ export function crearWhatsApp({ botId, api, alEstado, alMensaje, alFoto, alMetri
       else if (d.tipo === 'foto') alFoto?.(d.chatId, d.url);
     };
     worker.onerror = e => pintar({ estado: 'error', detalle: e.message || 'No se pudo iniciar WhatsApp en el navegador.' });
-    worker.postMessage({ tipo: 'iniciar', botId });
+    worker.postMessage({ tipo: 'iniciar', botId, clave: claveLocal });
   }
 
   function apagarWorker() {

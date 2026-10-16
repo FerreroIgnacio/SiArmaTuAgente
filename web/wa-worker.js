@@ -20,12 +20,14 @@ import makeWASocket, {
   normalizeMessageContent,
   proto,
 } from 'baileys';
+import { cifrarLocal, descifrarLocal, estaCifrado, importarClave } from '../public/cifrado-local.js';
 
 // Los errores dentro del objeto se muestran con su stack (copiados desde la consola salen como {})
 const log = f => (o, ...a) => { const e = o?.err || o?.error; f('[baileys]', ...a, o, ...(e ? [e?.stack || e] : [])); };
 const logger = { level: 'warn', child: () => logger, trace() {}, debug() {}, info() {}, warn: log(console.warn), error: log(console.error), fatal: log(console.error) };
 
-/* ---------- Sesión en IndexedDB (equivalente a useMultiFileAuthState) ---------- */
+/* ---------- Sesión en IndexedDB (equivalente a useMultiFileAuthState), cifrada con la clave del usuario ---------- */
+let clave = null;
 const db = new Promise((ok, mal) => {
   const r = indexedDB.open('siagente-wa', 1);
   r.onupgradeneeded = () => r.result.createObjectStore('kv');
@@ -38,13 +40,27 @@ async function tx(modo, fn) {
   await new Promise((ok, mal) => { t.oncomplete = ok; t.onerror = t.onabort = () => mal(t.error); });
   return res?.result;
 }
-const leer = async clave => {
-  const v = await tx('readonly', s => s.get(clave));
-  return v ? JSON.parse(v, BufferJSON.reviver) : null;
+// Si no se puede descifrar (era de otra cuenta) es como si no hubiera nada: pide el QR de nuevo
+const leer = async k => {
+  const v = await tx('readonly', s => s.get(k));
+  try { return v ? JSON.parse(await descifrarLocal(clave, v), BufferJSON.reviver) : null; } catch { return null; }
+};
+// Las escrituras se cifran antes de abrir la transacción y van en orden
+let escrituras = Promise.resolve();
+const escribir = async cambios => {
+  const listos = await Promise.all(cambios.map(async ([k, v]) => [k, v == null ? null : await cifrarLocal(clave, JSON.stringify(v, BufferJSON.replacer))]));
+  const hecho = escrituras.then(() => tx('readwrite', s => { for (const [k, v] of listos) v == null ? s.delete(k) : s.put(v, k); }));
+  escrituras = hecho.catch(() => {});
+  return hecho;
 };
 
 async function sesionGuardada(botId) {
   const pre = `${botId}:`;
+  // Lo guardado antes sin cifrar se cifra
+  const rango = IDBKeyRange.bound(pre, `${pre}￿`);
+  const [ks, vs] = await Promise.all([tx('readonly', s => s.getAllKeys(rango)), tx('readonly', s => s.getAll(rango))]);
+  const planos = ks.map((k, i) => [k, vs[i]]).filter(([, v]) => !estaCifrado(v));
+  if (planos.length) await escribir(planos.map(([k, v]) => [k, JSON.parse(v, BufferJSON.reviver)]));
   const creds = (await leer(`${pre}creds`)) || initAuthCreds();
   return {
     state: {
@@ -59,19 +75,12 @@ async function sesionGuardada(botId) {
           }));
           return datos;
         },
-        set: data => tx('readwrite', s => {
-          for (const type in data) {
-            for (const id in data[type]) {
-              const v = data[type][id];
-              if (v) s.put(JSON.stringify(v, BufferJSON.replacer), `${pre}${type}-${id}`);
-              else s.delete(`${pre}${type}-${id}`);
-            }
-          }
-        }),
+        set: data => escribir(Object.entries(data).flatMap(([type, ids]) =>
+          Object.entries(ids).map(([id, v]) => [`${pre}${type}-${id}`, v || null]))),
       },
     },
-    guardarCreds: () => tx('readwrite', s => s.put(JSON.stringify(creds, BufferJSON.replacer), `${pre}creds`)),
-    borrar: () => tx('readwrite', s => s.delete(IDBKeyRange.bound(pre, `${pre}￿`))),
+    guardarCreds: () => escribir([[`${pre}creds`, creds]]),
+    borrar: () => escrituras.then(() => tx('readwrite', s => s.delete(IDBKeyRange.bound(pre, `${pre}￿`)))),
   };
 }
 
@@ -265,6 +274,7 @@ onmessage = async ({ data: d }) => {
     switch (d.tipo) {
       case 'iniciar':
         botId = d.botId;
+        clave = await importarClave(d.clave);
         await iniciar();
         break;
       case 'enviar':

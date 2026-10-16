@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHmac, randomBytes } from 'node:crypto';
 import { env } from 'cloudflare:workers';
 
 // Secretos de los usuarios guardados en D1 (refresh token de Google, tokens de Meta): AES-256-GCM con el secret
@@ -21,3 +21,7 @@ export function descifrar(s) {
   d.setAuthTag(tag);
   return Buffer.concat([d.update(datos), d.final()]).toString('utf8');
 }
+
+// Clave AES-256 de cada usuario para lo que su página guarda en el navegador. Solo se entrega con la sesión iniciada:
+// después de salir los datos siguen ahí, pero nadie más que ese usuario los puede leer
+export const claveLocal = sub => createHmac('sha256', clave()).update(`local:${sub}`).digest('hex');

@@ -166,7 +166,7 @@ async function turno(bot, { chatId, nombre, texto = null, adjunto = null, avanza
   const t0 = Date.now();
   await db().prepare('DELETE FROM pendientes WHERE bot = ? AND chat = ?').bind(bot.id, chatId).run();
   const actual = (await getBot(bot.id)) || bot;
-  const { mensajes, acciones, vars, archivos, fuente, respuestaId, auto, ignorado, faltaArchivo } = await responder(actual, chatId, texto, { nombre, telefono: chatId }, { avanzar, adjunto });
+  const { mensajes, acciones, vars, archivos, fuente, respuestaId, auto, ignorado, faltaArchivo, nueva } = await responder(actual, chatId, texto, { nombre, telefono: chatId }, { avanzar, adjunto });
   if (!avanzar && (texto || adjunto)) await anotar(bot.id, { chatId, nombre, texto: texto || '', adjunto: adjunto && { tipo: adjunto.tipo, nombreArchivo: adjunto.nombreArchivo }, de: 'cliente', ts: t0 });
   // El estado pedía un archivo pero no se pudo guardar (sin Google conectado): queda avisado en el registro
   if (faltaArchivo) await anotar(bot.id, { chatId, nombre, texto: `⚠ No se pudo guardar el archivo del cliente: ${adjunto?.error || 'conectá Google en General → Integraciones'}`, de: 'bot', fuente: 'accion', ts: Date.now() });
@@ -180,7 +180,7 @@ async function turno(bot, { chatId, nombre, texto = null, adjunto = null, avanza
       await anotar(bot.id, { chatId, nombre, texto: `⚠ No se pudo enviar: ${err.message}`, de: 'bot', fuente: 'accion', ts: Date.now() });
     }
   }
-  await registrar(bot.id, { chatId, fuente, respuestaId, enviados: mensajes.length, ms: Date.now() - t0 });
+  await registrar(bot.id, { nueva, fuente, respuestaId, enviados: mensajes.length, ms: Date.now() - t0 });
   for (const a of acciones) {
     let resultado;
     try { resultado = `⚙ ${await ejecutar(actual, a, vars, { enviarWhatsApp: (jid, m) => enviar(actual, jid, m), archivos })}`; }

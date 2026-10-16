@@ -1,4 +1,4 @@
-# Headers de los estáticos que sirve Cloudflare. Mantener igual que el middleware de src/server.js
+# Headers de los estáticos que sirve Cloudflare. Mantener igual que la CSP de src/http.js
 /*
   X-Frame-Options: DENY
   X-Content-Type-Options: nosniff

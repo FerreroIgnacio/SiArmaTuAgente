@@ -1,9 +1,10 @@
 import { bajarArchivo } from './google.js';
 import { actualizarFila, agregarFila } from './planillas.js';
 import { enviarMail } from './mail.js';
+import { dentroDelLimite } from './http.js';
 
 // Acciones de un estado: se ejecutan al entrar, después de mandar sus mensajes.
-//   tipo 'mail'     → para, asunto, cuerpo                         (Email Service de la plataforma, responde al dueño)
+//   tipo 'mail'     → asunto, cuerpo                               (Email Service de la plataforma, siempre al mail del dueño)
 //   tipo 'whatsapp' → numero, texto                                (sale por el número conectado del agente)
 //   tipo 'sheets'   → planilla, hoja, modo 'agregar' | 'actualizar', columnas: [{ columna, valor }],
 //                     buscarColumna, buscarValor, crear            (Sheets del dueño, creada desde la app)
@@ -59,7 +60,7 @@ const conVariables = (t, vars, archivos = {}) => String(t ?? '').split('\n')
 function resolver(a, vars) {
   const v = t => interpolar(t, vars);
   switch (a.tipo) {
-    case 'mail': return { ...a, para: v(a.para).trim(), asunto: v(a.asunto), cuerpo: v(a.cuerpo) };
+    case 'mail': return { ...a, asunto: v(a.asunto), cuerpo: v(a.cuerpo) };
     case 'whatsapp': return { ...a, numero: v(a.numero).replace(/\D/g, ''), texto: v(conVariables(a.texto, vars)) };
     case 'sheets': return {
       ...a,
@@ -74,7 +75,7 @@ function resolver(a, vars) {
 export function describir(a, vars) {
   const r = resolver(a, vars);
   switch (r.tipo) {
-    case 'mail': return `Mandaría un mail a ${r.para || '(sin destinatario)'}: "${r.asunto}"`;
+    case 'mail': return `Te mandaría un mail: "${r.asunto}"`;
     case 'whatsapp': return `Mandaría un WhatsApp a +${r.numero || '(sin número)'}: "${r.texto}"`;
     case 'sheets': {
       const cols = r.columnas.map(c => `${c.columna}=${c.valor}`).join(', ');
@@ -92,7 +93,10 @@ export async function ejecutar(bot, a, vars, { enviarWhatsApp, archivos = {} }) 
   const r = resolver(a, vars);
   switch (r.tipo) {
     case 'mail': {
-      if (!r.para) throw new Error('El mail no tiene destinatario');
+      // Los mails solo le llegan al dueño de la cuenta: no se pueden mandar a otros destinatarios
+      const para = bot.duenoEmail;
+      if (!para) throw new Error('El agente no tiene el mail del dueño: volvé a iniciar sesión');
+      if (!(await dentroDelLimite('LIMITE_MAIL', bot.dueno))) throw new Error('demasiados mails seguidos, esperá un minuto');
       // Solo se adjuntan los que están en Drive; los que quedaron en el navegador del dueño no llegan al servidor
       const adjuntos = archivosEn(a.cuerpo, archivos).filter(x => x.url?.startsWith('drive:'));
       const cuerpo = interpolar(a.cuerpo, sinArchivos(vars, archivos, x => x.url?.startsWith('drive:') ? `${x.nombreArchivo} (adjunto)` : `${x.nombreArchivo} (no adjuntado: conectá Google)`));
@@ -100,8 +104,8 @@ export async function ejecutar(bot, a, vars, { enviarWhatsApp, archivos = {} }) 
         const { datos, tipo } = await bajarArchivo(bot.dueno, x.url.slice(6));
         return { filename: x.nombreArchivo, content: datos, type: tipo };
       }));
-      await enviarMail({ ...r, cuerpo, adjuntos: contenidos, responderA: bot.duenoEmail });
-      return `Mail enviado a ${r.para}${adjuntos.length ? ` con ${adjuntos.length} adjunto${adjuntos.length > 1 ? 's' : ''}` : ''}`;
+      await enviarMail({ para, asunto: r.asunto, cuerpo, adjuntos: contenidos });
+      return `Mail enviado a ${para}${adjuntos.length ? ` con ${adjuntos.length} adjunto${adjuntos.length > 1 ? 's' : ''}` : ''}`;
     }
     case 'whatsapp': {
       if (!r.numero) throw new Error('El WhatsApp no tiene número');

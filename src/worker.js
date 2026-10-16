@@ -6,9 +6,9 @@ import { rutasAuth, usuario } from './auth.js';
 import { ejecutar, interpolar, variables } from './acciones.js';
 import { desconectarGoogle, estadoGoogle, idPlanilla, tokenDe } from './google.js';
 import { asegurarPlanilla, borrarPlanilla, crearPlanilla, hojasDe, listarPlanillas, sincronizarDrive, vistaPrevia } from './planillas.js';
-import { SEGURIDAD, json, redirigir } from './http.js';
+import { SEGURIDAD, demasiados, dentroDelLimite, json, redirigir } from './http.js';
 import plantilla from './plantilla.json';
-import { cifrar } from './cifrado.js';
+import { cifrar, claveLocal } from './cifrado.js';
 import { correrPendientes, enviar as enviarMeta, registroDesde, verificar, webhook } from './meta.js';
 
 // Todo el servidor en un Worker de Cloudflare: los estáticos de public/ los sirve Assets y acá solo llegan
@@ -57,7 +57,8 @@ const estadoDe = bot => bot.conexion?.proveedor === 'meta' && bot.conexion.meta?
   ? { estado: 'conectado', numero: bot.conexion.meta.numero, proveedor: 'meta' }
   : { estado: 'desconectado', proveedor: bot.conexion?.proveedor };
 
-ruta('GET', '/api/yo', ({ yo }) => json(yo));
+// claveLocal: con la que la página cifra lo que guarda en el navegador (conversaciones, sesión de WhatsApp)
+ruta('GET', '/api/yo', ({ yo }) => json({ ...yo, claveLocal: claveLocal(yo.sub) }));
 
 ruta('GET', '/api/bots', async ({ yo }) => json(await Promise.all((await botsDe(yo.sub)).map(async b => ({
   id: b.id, nombre: b.agente.nombre, estado: estadoDe(b).estado,
@@ -65,14 +66,12 @@ ruta('GET', '/api/bots', async ({ yo }) => json(await Promise.all((await botsDe(
 })))));
 
 // Cada cuenta arranca con el agente de ejemplo (src/plantilla.json, archivos en public/plantilla/).
-// Los mails de sus acciones van al dueño; las planillas las elige él
-// Copia del agente de ejemplo para este dueño: los mails le llegan a él y las planillas usan la primera que creó
+// Copia del agente de ejemplo para este dueño: las planillas usan la primera que creó
 async function ejemploPara(yo) {
   const ejemplo = structuredClone(plantilla);
   await asegurarPlanilla(yo.sub).catch(() => {});
   const planilla = await listarPlanillas(yo.sub).then(ps => ps.sort((a, b) => String(a.creada).localeCompare(b.creada))[0]?.url || '', () => '');
   for (const n of ejemplo.flujo.nodos) {
-    if (n.accion?.tipo === 'mail') n.accion.para = yo.email;
     if (n.accion?.tipo === 'sheets' && !n.accion.planilla) n.accion.planilla = planilla;
   }
   return ejemplo;
@@ -149,14 +148,14 @@ ruta('POST', '/api/bots/:id/turno', async ({ bot, body = {} }) => {
   if (!chatId || typeof chatId !== 'string') throw new Error('Falta el chat');
   if (chatId.endsWith('@g.us') && bot.reglas?.ignorarGrupos !== false) return json({ ignorado: true });
   const t0 = Date.now();
-  const { mensajes, acciones, vars, archivos, fuente, respuestaId, auto, ignorado, faltaArchivo } = await responder(bot, chatId, texto, { nombre, telefono: telefono || chatId }, { avanzar, adjunto: adjuntoSubido(body) });
+  const { mensajes, acciones, vars, archivos, fuente, respuestaId, auto, ignorado, faltaArchivo, nueva } = await responder(bot, chatId, texto, { nombre, telefono: telefono || chatId }, { avanzar, adjunto: adjuntoSubido(body) });
   if (ignorado || faltaArchivo) return json({ ignorado, faltaArchivo });
   const whatsapp = [], registro = [];
   for (const a of acciones) {
     try { registro.push(`⚙ ${await ejecutar(bot, a, vars, { enviarWhatsApp: enviarWhatsAppDe(bot, true, whatsapp), archivos })}`); }
     catch (err) { registro.push(`⚠ Acción fallida: ${err.message}`); console.error(`[${bot.id}] acción`, err.message); }
   }
-  await registrar(bot.id, { chatId, fuente, respuestaId, enviados: mensajes.length, ms: Date.now() - t0 });
+  await registrar(bot.id, { nueva, fuente, respuestaId, enviados: mensajes.length, ms: Date.now() - t0 });
   // Si la charla queda abierta, la página manda la despedida cuando el cliente deja de escribir (engine.EXPIRA_MS)
   const despedida = auto && !auto.destino ? '' : interpolar(bot.agente.despedida, vars).trim();
   return json({ mensajes: mensajes.map(m => ({ ...m, resumen: resumenMensaje(m) })), whatsapp, registro, fuente, auto, despedida });
@@ -173,7 +172,9 @@ ruta('POST', '/api/bots/:id/acciones/probar', async ({ bot, body = {} }) => {
   }
 }, { bot: true });
 
-ruta('GET', '/api/bots/:id/metricas', async ({ bot }) => json(await resumenMetricas(bot)), { bot: true });
+// La página las pide cada 30 s y con el botón de refrescar
+ruta('GET', '/api/bots/:id/metricas', async ({ bot, yo }) =>
+  (await dentroDelLimite('LIMITE_METRICAS', yo.sub)) ? json(await resumenMetricas(bot)) : demasiados(), { bot: true });
 
 // Planillas del dueño para las acciones de Sheets (con drive.file la app solo ve y escribe las que crea).
 // Cada una con cuántas acciones de Sheets (de todos los agentes del dueño) la usan
@@ -210,6 +211,7 @@ ruta('GET', '/api/estado', () => json({ estado: ['degradado', 'caido'].includes(
 async function api(req, url) {
   const yo = await usuario(req);
   if (!yo) return json({ error: 'Sesión vencida' }, 401);
+  if (!(await dentroDelLimite('LIMITE_API', yo.sub))) return demasiados();
   const def = rutas.find(x => x.metodo === req.method && x.re.test(url.pathname));
   if (!def) return json({ error: 'No encontrado' }, 404);
   const params = Object.fromEntries(Object.entries(url.pathname.match(def.re).groups || {}).map(([k, v]) => [k, decodeURIComponent(v)]));
@@ -245,6 +247,7 @@ export default {
     const url = new URL(req.url);
     const p = url.pathname;
     if (p.startsWith('/webhooks/meta/')) return webhook(req, url, ctx);
+    if (p.startsWith('/auth/') && !(await dentroDelLimite('LIMITE_AUTH', req.headers.get('cf-connecting-ip') || 'local'))) return demasiados();
     if (p.startsWith('/auth/')) return (await rutasAuth(req, url)) || json({ error: 'No encontrado' }, 404);
     if (p.startsWith('/api/')) return api(req, url);
     if (p === '/index.html') return redirigir('/');

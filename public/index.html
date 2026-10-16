@@ -205,11 +205,12 @@
       <section class="sec sec-wide" data-sec="metricas" hidden>
         <div class="sec-head">
           <h2>Métricas</h2>
-          <p>Mensajes reales de WhatsApp (la vista previa no cuenta).</p>
+          <p>Mensajes reales de WhatsApp (la vista previa no cuenta). Se actualizan cada 30 segundos.</p>
+          <button type="button" class="btn btn-outline btn-sm" id="refrescarMetricas">Refrescar</button>
         </div>
         <div class="kpis">
           <div class="kpi"><span>Mensajes recibidos</span><b id="kRecibidos">0</b></div>
-          <div class="kpi"><span>Conversaciones</span><b id="kChats">0</b></div>
+          <div class="kpi"><span>Conversaciones</span><b id="kChats">0</b><small id="kPorChat"></small></div>
           <div class="kpi"><span>Respondidos automáticamente</span><b id="kResueltos">–</b><small id="kResueltosAbs"></small></div>
           <div class="kpi"><span>Tiempo de respuesta</span><b id="kTiempo">–</b><small>promedio</small></div>
         </div>

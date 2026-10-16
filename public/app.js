@@ -1,5 +1,6 @@
 import { crearWhatsApp } from './whatsapp.js';
 import { mostrarEn, subirADrive } from './drive.js';
+import { cifrarLocal, descifrarLocal, importarClave } from './cifrado-local.js';
 
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
@@ -13,6 +14,8 @@ let wa = null; // WhatsApp personal corriendo en esta pestaña (ver whatsapp.js)
 let waEnEspera = null; // el de arriba mientras se eligió Meta sin haber escaneado el QR: sigue vivo por si se vuelve
 let sesionPrueba = nuevaSesion();
 let estadoPrueba = null; // estado donde está la charla de prueba, se resalta en el lienzo
+let yo = null; // /api/yo
+let claveLocal = null; // CryptoKey con la que se cifra lo que queda en este navegador (ver cifrado-local.js)
 
 function nuevaSesion() { return Math.random().toString(36).slice(2); }
 const nuevoId = () => (crypto.randomUUID ? crypto.randomUUID() : nuevaSesion() + Date.now().toString(36));
@@ -574,7 +577,7 @@ function erroresAccion(a) {
   const e = [], si = (cond, msg) => cond && e.push(msg);
   switch (a.tipo) {
     case 'mail':
-      si(!a.para?.trim(), 'Falta el destinatario');
+      si(!a.asunto?.trim() && !a.cuerpo?.trim(), 'Falta el mensaje');
       break;
     case 'whatsapp':
       si(estadoAgente && estadoAgente !== 'conectado', 'El agente está apagado');
@@ -592,7 +595,7 @@ function erroresAccion(a) {
 
 function resumenAccion(a) {
   switch (a.tipo) {
-    case 'mail': return `Mail a ${a.para || '…'}`;
+    case 'mail': return 'Mail para vos';
     case 'whatsapp': return `WhatsApp a ${a.numero || '…'}`;
     case 'sheets': return a.modo === 'actualizar' ? 'Actualizar fila en Sheets' : 'Agregar fila en Sheets';
     default: return 'Acción';
@@ -985,7 +988,7 @@ function ayudaVariables(extra = '') {
 // Nombre de variable válido: minúsculas, sin tildes ni espacios
 const nombreVariable = s => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9_]+/g, '_').replace(/^_+/, '').slice(0, 30);
 const accionVacia = tipo => ({
-  mail: { tipo, para: '', asunto: '', cuerpo: '' },
+  mail: { tipo, asunto: '', cuerpo: '' },
   whatsapp: { tipo, numero: '', texto: '' },
   sheets: { tipo, planilla: '', hoja: '', modo: 'agregar', columnas: [{ columna: 'A', valor: '{fecha}' }, { columna: 'B', valor: '{nombre}' }, { columna: 'C', valor: '{telefono}' }], buscarColumna: 'C', buscarValor: '{telefono}', crear: true },
 }[tipo]);
@@ -994,10 +997,10 @@ function camposAccion(a, rehacer) {
   switch (a.tipo) {
     case 'mail':
       return [
-        campo('Para', a, 'para', { placeholder: 'ventas@tunegocio.com', type: 'email' }),
+        el('label', {}, 'Para', el('input', { value: yo?.email || '', readOnly: true, disabled: true })),
         campo('Asunto', a, 'asunto', { placeholder: 'Nuevo pedido de {nombre}' }),
         campo('Mensaje', a, 'cuerpo', { tipo: 'textarea', rows: 3, placeholder: '{nombre} (+{telefono}) escribió: {mensaje}' }),
-        el('small', { class: 'help' }, 'Sale desde la casilla de avisos de la plataforma. Si responden, la respuesta te llega a tu mail.'),
+        el('small', { class: 'help' }, 'Te llega a vos, al mail con el que iniciaste sesión, desde la casilla de avisos de la plataforma.'),
       ];
     case 'whatsapp':
       return [
@@ -1673,17 +1676,27 @@ const convs = new Map(); // chatId -> { nombre, msgs, leido }
 let convSel = null;
 const horaLog = ts => new Date(ts).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
 
-// Las conversaciones se guardan en el navegador (por agente) para leerlas aunque el agente esté apagado
-const claveConvs = () => `convs:${botId}`;
+// Las conversaciones se guardan en el navegador (por agente) para leerlas aunque el agente esté apagado.
+// Cifradas con la clave del usuario: al salir quedan, pero solo se leen volviendo a entrar con la misma cuenta
+let guardandoConvs = Promise.resolve();
 function guardarConvs() {
-  const datos = [...convs].map(([id, c]) => [id, { ...c, msgs: c.msgs.slice(-300) }]);
-  guardarLocal(claveConvs(), JSON.stringify(datos));
+  const clave = `convs:${botId}`, datos = JSON.stringify([...convs].map(([id, c]) => [id, { ...c, msgs: c.msgs.slice(-300) }]));
+  guardandoConvs = guardandoConvs.then(async () => guardarLocal(clave, await cifrarLocal(claveLocal, datos))).catch(err => console.warn('Conversaciones', err));
 }
 
-function reiniciarConvs() {
+async function reiniciarConvs() {
   convs.clear();
   convSel = null;
-  try { for (const [id, c] of JSON.parse(leer(claveConvs()) || '[]')) convs.set(id, c); } catch {}
+  pintarConvs();
+  const id = botId;
+  let guardadas = [];
+  try { guardadas = JSON.parse(await descifrarLocal(claveLocal, leer(`convs:${id}`) || '[]')); } catch {}
+  if (botId !== id || !guardadas.length) return;
+  // Lo que llegó mientras se descifraba va después de lo guardado
+  for (const [chat, c] of guardadas) {
+    const nueva = convs.get(chat);
+    convs.set(chat, nueva ? { ...c, ...nueva, msgs: [...c.msgs, ...nueva.msgs] } : c);
+  }
   pintarConvs();
 }
 
@@ -1820,12 +1833,11 @@ function prepararWhatsApp(proveedor) {
   if (!wa && waEnEspera) { wa = waEnEspera; waEnEspera = null; pintarEstado(wa.estado()); }
   if (wa) return wa;
   const nuevo = wa = crearWhatsApp({
-    botId, api,
+    botId, claveLocal: yo.claveLocal, api,
     // En espera no pinta; si justo escanean el QR con Meta elegido, se corta (la sesión queda guardada)
     alEstado: s => { if (nuevo === wa) pintarEstado(s); else if (nuevo === waEnEspera && s.estado === 'conectado') nuevo.desconectar(); },
     alMensaje: agregarLog,
     alFoto: ponerFoto,
-    alMetricas: () => { if (!$('.sec[data-sec="metricas"]').hidden) cargarMetricas(); },
     alMedia: mediaLista,
   });
   return wa;
@@ -1852,10 +1864,7 @@ function escucharEventos(proveedor) {
         const nuevos = await api('GET', `/api/bots/${id}/registro?desde=${Number(leer(clave)) || 0}`);
         if (botId !== id) return;
         for (const m of nuevos) agregarLog(m);
-        if (nuevos.length) {
-          guardarLocal(clave, String(nuevos.at(-1).ts));
-          if (!$('.sec[data-sec="metricas"]').hidden) cargarMetricas();
-        }
+        if (nuevos.length) guardarLocal(clave, String(nuevos.at(-1).ts));
       } catch (err) { console.warn('Registro', err); }
     }
     registroTimer = setTimeout(traer, 4000);
@@ -1914,6 +1923,7 @@ async function cargarMetricas() {
   if (!m) return;
   $('#kRecibidos').textContent = fmt(m.recibidos);
   $('#kChats').textContent = fmt(m.conversaciones);
+  $('#kPorChat').textContent = m.conversaciones ? `${m.mensajesPorConversacion.toLocaleString('es-AR')} mensajes por conversación` : '';
   $('#kResueltos').textContent = m.recibidos ? `${Math.round((m.resueltos / m.recibidos) * 100)}%` : '–';
   $('#kResueltosAbs').textContent = m.recibidos ? `${fmt(m.resueltos)} de ${fmt(m.recibidos)}` : '';
   $('#kTiempo').textContent = m.recibidos ? (m.msPromedio < 1000 ? `${m.msPromedio} ms` : `${(m.msPromedio / 1000).toFixed(1)} s`) : '–';
@@ -1959,7 +1969,14 @@ async function cargarMetricas() {
     ? m.top.map(t => el('tr', {}, el('td', {}, t.titulo), el('td', {}, fmt(t.usos))))
     : [el('tr', {}, el('td', { class: 'help' }, 'Sin datos todavía'), el('td'))]));
 }
-setInterval(() => { if (!document.hidden && !$('.sec[data-sec="metricas"]').hidden) cargarMetricas(); }, 500);
+setInterval(() => { if (!document.hidden && !$('.sec[data-sec="metricas"]').hidden) cargarMetricas(); }, 30000);
+// El botón se apaga 10 s después de usarlo (el servidor también limita cuántas veces se piden)
+$('#refrescarMetricas').onclick = async e => {
+  const b = e.currentTarget;
+  b.disabled = true;
+  setTimeout(() => (b.disabled = false), 10000);
+  await cargarMetricas();
+};
 
 /* ---------- Probador ---------- */
 const chat = $('#chat');
@@ -2156,7 +2173,8 @@ async function pintarGoogle(error = '') {
 }
 
 async function iniciar() {
-  const yo = await api('GET', '/api/yo');
+  yo = await api('GET', '/api/yo');
+  claveLocal = await importarClave(yo.claveLocal);
   $('#usuario').title = yo.email;
   $('#usuarioNombre').textContent = yo.nombre || yo.email;
   if (yo.foto) $('#usuarioFoto').src = yo.foto;
