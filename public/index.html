@@ -90,6 +90,7 @@
             <span class="pill" id="pill2" data-estado="desconectado">Desconectado</span>
             <span id="statusDetail" class="help"></span>
           </div>
+          <p class="help">El agente se queda conectado mientras tengas esta ventana abierta.</p>
           <div class="seg" role="radiogroup">
             <label><input type="radio" name="conexion.proveedor" value="baileys"><span>WhatsApp (QR)</span></label>
             <label><input type="radio" name="conexion.proveedor" value="meta"><span>API de Meta</span></label>
@@ -142,6 +143,7 @@
         <div class="sec-head">
           <h2>Respuestas</h2>
           <p>El recorrido de la conversación. Cada estado manda sus mensajes y escucha respuestas; cada respuesta lleva a otro estado.</p>
+          <button type="button" class="btn btn-danger-solid btn-sm" id="flowRestaurar"></button>
         </div>
         <div class="flow" id="flow" aria-label="Lienzo de respuestas">
           <div class="flow-world" id="flowWorld">
@@ -180,9 +182,13 @@
       <section class="sec" data-sec="planillas" hidden>
         <div class="sec-head">
           <h2>Planillas</h2>
-          <p>Planillas de Google Sheets donde escriben las acciones de tus agentes. Están en el Drive de tu cuenta de Google conectada.</p>
+          <p>Planillas de Google Sheets donde escriben las acciones de tus agentes. Se guardan en la app y, si querés, las sincronizás con tu Google Drive.</p>
         </div>
         <div class="card">
+          <div class="planillas-sync" id="planillasSync" hidden>
+            <span>Sincronizá tus planillas con Google Drive para acceder a ellas desde cualquier dispositivo y no perderlas.</span>
+            <button type="button" class="btn btn-outline btn-sm" id="planillasSincronizar">Sincronizar con Drive</button>
+          </div>
           <div class="planilla-nueva">
             <input id="planillaNombre" placeholder="Nombre de la planilla nueva" aria-label="Nombre de la planilla nueva">
             <button type="button" class="btn btn-primary btn-sm" id="planillaCrear">Crear planilla</button>
